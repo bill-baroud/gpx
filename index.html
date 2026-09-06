@@ -3,14 +3,423 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Relevés · 6 stations</title>
+<title>Comparateur de profils altimétriques</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#12161d">
+<meta name="theme-color" content="#2b2620">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-title" content="GPX Compare">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<style>
+  :root{
+    --paper: #f1ecdd;
+    --paper-deep: #e8e0cb;
+    --ink: #2b2620;
+    --ink-soft: #6b6250;
+    --line: #d3c7a8;
+    --trace-a: #b5651d;
+    --trace-a-fill: rgba(181,101,29,0.16);
+    --trace-b: #2f6165;
+    --trace-b-fill: rgba(47,97,101,0.16);
+    --white: #fffdf6;
+    --w-temp: #c1440e;
+    --w-precip: #3b6e8f;
+    --w-wind: #6a7d3f;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(circle at 50% 0%, rgba(255,255,255,0.4), transparent 60%),
+      repeating-radial-gradient(circle at 12% 8%, transparent 0, transparent 38px, rgba(43,38,32,0.035) 39px, transparent 40px);
+    color:var(--ink);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height:100vh;
+    padding: 32px 20px 64px;
+  }
+  .wrap{ max-width: 980px; margin: 0 auto; }
+
+  header{ margin-bottom: 28px; }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:22px; height:1px;
+    background:var(--trace-a);
+    display:inline-block;
+  }
+  h1{
+    font-family:'Fraunces', Georgia, serif;
+    font-weight:600;
+    font-size: clamp(26px, 4vw, 38px);
+    margin:0 0 8px;
+    letter-spacing:-0.01em;
+  }
+  .sub{ color:var(--ink-soft); font-size:14px; max-width:560px; line-height:1.5; margin:0; }
+
+  /* Dropzone */
+  .dropzone{
+    position:relative;
+    border: 1.5px dashed var(--line);
+    border-radius: 4px;
+    background: var(--white);
+    padding: 36px 24px;
+    text-align:center;
+    margin: 22px 0 8px;
+    transition: border-color .15s, background .15s;
+    cursor:pointer;
+  }
+  .dropzone.drag{
+    border-color: var(--trace-a);
+    background: #fff8ec;
+  }
+  .dropzone.filled{ padding: 20px 24px; }
+  .dz-icon{
+    width:34px;height:34px;margin:0 auto 12px;
+    stroke: var(--ink-soft);
+  }
+  .dz-title{ font-size:15px; font-weight:600; margin-bottom:4px; }
+  .dz-hint{ font-size:12.5px; color:var(--ink-soft); }
+  .dz-hint kbd{
+    font-family:'IBM Plex Mono',monospace;
+    background:var(--paper-deep);
+    border-radius:3px; padding:1px 5px; font-size:11px;
+  }
+  input[type=file]{ display:none; }
+
+  .files-row{
+    display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:14px;
+  }
+  .file-chip{
+    display:flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    background: var(--paper-deep);
+    border-radius:20px;
+    padding:6px 12px 6px 10px;
+  }
+  .file-chip .dot{ width:8px;height:8px;border-radius:50%; flex-shrink:0;}
+  .file-chip button{
+    border:none; background:none; cursor:pointer; color:var(--ink-soft);
+    font-size:14px; line-height:1; padding:0 2px;
+  }
+  .file-chip button:hover{ color:var(--ink); }
+
+  .error-msg{
+    font-size:12.5px; color:#a13c3c; margin-top:8px; font-family:'IBM Plex Mono',monospace;
+    display:none;
+  }
+
+  /* Stat cards */
+  .stats-row{
+    display:none;
+    gap:14px; margin: 26px 0 18px; flex-wrap:wrap;
+  }
+  .stat-card{
+    flex:1 1 250px;
+    background: var(--white);
+    border-radius:4px;
+    border-left: 3px solid var(--trace-a);
+    padding: 14px 16px;
+    cursor:pointer;
+    transition: opacity .15s, transform .1s;
+  }
+  .stat-card.b{ border-left-color: var(--trace-b); }
+  .stat-card.hidden-trace{ opacity:0.4; }
+  .stat-card:active{ transform: scale(0.99); }
+  .stat-card .name{
+    font-weight:600; font-size:13.5px; margin-bottom:8px;
+    display:flex; align-items:center; gap:7px;
+  }
+  .stat-card .name .sw{ width:10px;height:10px;border-radius:2px; }
+  .stat-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:6px 16px;
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--ink-soft);
+  }
+  .stat-grid strong{ color:var(--ink); font-weight:600; display:block; font-size:13px; margin-top:1px; }
+
+  /* Push-to-map action */
+  .actions-row{
+    display:none;
+    align-items:flex-start;
+    gap:14px;
+    margin: 4px 0 22px;
+    flex-wrap:wrap;
+  }
+  .primary-btn{
+    display:inline-flex; align-items:center; gap:9px;
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px; font-weight:500;
+    background: var(--ink); color: var(--paper);
+    border:none; border-radius:22px;
+    padding: 11px 20px;
+    cursor:pointer;
+    transition: background .15s, transform .1s;
+    white-space:nowrap;
+  }
+  .primary-btn:hover{ background:#453d31; }
+  .primary-btn:active{ transform:scale(0.98); }
+  .primary-btn svg{ width:15px;height:15px; flex-shrink:0; }
+  .actions-note{
+    font-size:12px; color:var(--ink-soft); line-height:1.5; max-width:420px; padding-top:12px;
+  }
+
+  /* Embedded OSM map */
+  .map-card{
+    display:none;
+    background: var(--white);
+    border-radius:4px;
+    padding: 20px;
+    margin-bottom: 22px;
+  }
+  #leafletMap{
+    height:420px;
+    border-radius:4px;
+    background: var(--paper-deep);
+  }
+  .leaflet-container{ font-family:'IBM Plex Sans', sans-serif; }
+  .slope-legend{ margin-top:12px; }
+  .chart-card .slope-legend{ padding:0 20px; }
+  .slope-legend-bar{
+    height:8px; border-radius:4px;
+    background: linear-gradient(to right, rgb(26,111,176), rgb(58,143,92), rgb(140,132,118), rgb(214,168,34), rgb(190,58,40));
+  }
+  .slope-legend-labels{
+    display:flex; justify-content:space-between;
+    font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--ink-soft);
+    margin-top:4px;
+  }
+
+  /* Weather section — 2 cards side by side (départ / arrivée), inspired by the reference model */
+  .weather-section{ display:none; margin-bottom: 22px; }
+  .weather-title{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--ink-soft); padding: 0 4px 10px;
+  }
+  .weather-legend{
+    display:flex; gap:16px; flex-wrap:wrap; padding: 0 4px 12px; font-size:11.5px; color:var(--ink-soft);
+    font-family:'IBM Plex Mono', monospace;
+  }
+  .weather-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .weather-legend .sw{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+  .weather-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:14px;
+  }
+  @media (max-width: 700px){ .weather-grid{ grid-template-columns: 1fr; } }
+
+  .wcard{
+    background: var(--white);
+    border-radius:4px;
+    border-top: 3px solid var(--ink-soft);
+    padding: 16px 16px 10px;
+    display:flex; flex-direction:column;
+    min-height: 340px;
+  }
+  .wcard.start{ border-top-color: var(--trace-a); }
+  .wcard.end{ border-top-color: var(--trace-b); }
+  .wcard-head{
+    display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:2px;
+  }
+  .wcard-name{ font-size:14px; font-weight:600; color:var(--ink); }
+  .wcard-badge{
+    font-family:'IBM Plex Mono', monospace; font-size:9.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-soft); border:1px solid var(--paper-deep); border-radius:20px; padding:3px 9px; white-space:nowrap;
+  }
+  .wcard-coords{
+    font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--ink-soft); margin-top:3px;
+  }
+  .wcard-now{ display:flex; align-items:baseline; gap:10px; margin: 10px 0 6px; }
+  .wcard-now-temp{ font-family:'Fraunces', Georgia, serif; font-size:30px; font-weight:600; color:var(--w-temp); }
+  .wcard-now-detail{ font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--ink-soft); line-height:1.6; }
+  .wcard-chart-wrap{ flex:1; min-height:190px; position:relative; margin-top:4px; }
+  .wcard-state{
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--ink-soft);
+    padding: 40px 0; text-align:center;
+  }
+  .wcard-state.err{ color:#a13c3c; }
+  .weather-attrib{
+    font-size:11px; color:var(--ink-soft); padding: 10px 4px 0; font-family:'IBM Plex Mono', monospace;
+  }
+
+  /* Nearest public transport table */
+  .transit-section{
+    display:none;
+    background: var(--white);
+    border-radius:4px;
+    padding: 20px;
+    margin-bottom: 22px;
+  }
+  .transit-table{
+    width:100%; border-collapse:collapse; margin-top:10px; font-size:13px;
+  }
+  .transit-table th{
+    text-align:left; font-family:'IBM Plex Mono', monospace; font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft);
+    padding: 6px 10px; border-bottom:1px solid var(--paper-deep);
+  }
+  .transit-table td{
+    padding: 9px 10px; border-bottom:1px solid var(--paper-deep); vertical-align:top;
+  }
+  .transit-table td a{ color: var(--trace-a); text-decoration:underline; }
+  .transit-loading, .transit-error{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft); padding:10px;
+  }
+  .transit-error{ color:#a13c3c; }
+  .transit-verified{
+    font-family:'IBM Plex Mono', monospace; font-size:9.5px; color:#3a7a4a;
+    background: rgba(58,122,74,0.1); border-radius:10px; padding:1px 6px; white-space:nowrap;
+  }
+  .transit-note{
+    font-size:11.5px; color:var(--ink-soft); line-height:1.5; margin-top:12px;
+  }
+
+  /* Chart */
+  .chart-card{
+    display:none;
+    background: var(--white);
+    border-radius:4px;
+    padding: 20px 8px 12px;
+    position:relative;
+  }
+  .chart-title{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--ink-soft); padding: 0 20px 14px;
+  }
+  svg.chart{ display:block; width:100%; height:auto; overflow:visible; }
+  .axis-label{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; fill:var(--ink-soft); }
+  .grid-line{ stroke:var(--line); stroke-width:1; }
+  .tooltip-box{
+    position:absolute;
+    background: var(--ink);
+    color: var(--paper);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    padding:8px 10px;
+    border-radius:4px;
+    pointer-events:none;
+    opacity:0;
+    transition: opacity .1s;
+    white-space:nowrap;
+    z-index: 5;
+  }
+  .tooltip-box .row{ display:flex; justify-content:space-between; gap:14px; }
+  .tooltip-box .row .sw{ width:8px;height:8px;border-radius:2px; display:inline-block; margin-right:6px; }
+  .tooltip-box .dist{ opacity:0.65; margin-bottom:4px; }
+
+  .footnote{
+    font-size:11.5px; color:var(--ink-soft); line-height:1.6; margin-top:14px; padding:0 20px;
+  }
+
+  .reset-btn{
+    display:none;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    color: var(--ink-soft);
+    background:none;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 6px 14px;
+    cursor:pointer;
+    margin-top: 18px;
+  }
+  .reset-btn:hover{ color: var(--ink); border-color: var(--ink-soft); }
+
+  @media (max-width: 560px){
+    .stat-grid{ grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept=".gpx" multiple>
+    <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+    </svg>
+    <div class="dz-title">Glissez-déposez deux traces GPX</div>
+    <div class="dz-hint">ou <kbd>cliquez</kbd> pour parcourir vos fichiers — 2 fichiers .gpx</div>
+    <div class="files-row" id="filesRow"></div>
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+
+  <div class="chart-card" id="chartCard">
+    <div class="chart-title">Altitude (m) — distance parcourue (km)</div>
+    <svg class="chart" id="chartSvg" viewBox="0 0 900 380" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="tooltip-box" id="tooltip"></div>
+    <p class="footnote" id="footnote"></p>
+    <div class="slope-legend">
+      <div class="slope-legend-bar"></div>
+      <div class="slope-legend-labels">
+        <span>Descente forte</span>
+        <span>Plat</span>
+        <span>Montée forte</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-row" id="statsRow"></div>
+
+  <div class="map-card" id="mapCard">
+    <div class="chart-title">Les 2 traces sur OpenStreetMap</div>
+    <div id="leafletMap"></div>
+    <div class="slope-legend" id="slopeLegend">
+      <div class="slope-legend-bar"></div>
+      <div class="slope-legend-labels">
+        <span>Descente forte</span>
+        <span>Plat</span>
+        <span>Montée forte</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="weather-section" id="weatherSection">
+    <div class="weather-title">Météo — 3 prochains jours (départ et arrivée de la 1ère trace)</div>
+    <div class="weather-legend">
+      <span><span class="sw" style="background:var(--w-temp);"></span>Température (°C)</span>
+      <span><span class="sw" style="background:var(--w-precip);"></span>Précipitations (mm)</span>
+      <span><span class="sw" style="background:var(--w-wind);"></span>Vent — échelle de Beaufort</span>
+    </div>
+    <div class="weather-grid" id="weatherGrid"></div>
+    <p class="weather-attrib">Données · <a href="https://open-meteo.com" target="_blank" rel="noopener" style="color:inherit;">Open-Meteo.com</a></p>
+  </div>
+
+  <div class="transit-section" id="transitSection">
+    <div class="chart-title">Transports en commun les plus proches</div>
+    <table class="transit-table">
+      <thead>
+        <tr><th>Point</th><th>Arrêt / gare</th><th>Distance</th><th>Lien</th></tr>
+      </thead>
+      <tbody id="transitBody"></tbody>
+    </table>
+    <p class="transit-note">Recherche automatique dans les données OpenStreetMap (Overpass API). Le lien pointe vers le site de l'exploitant quand il est identifiable, sinon vers la fiche OpenStreetMap de l'arrêt.</p>
+  </div>
+
+  <div class="actions-row" id="actionsRow">
+    <button type="button" class="primary-btn" id="pushBtn"></button>
+    <p class="actions-note" id="actionsNote"></p>
+  </div>
+
+  <div style="text-align:center;">
+    <button class="reset-btn" id="resetBtn">↺ Recommencer</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script>
 /* Chart.js v4.4.4 — embarqué localement (aucune dépendance CDN externe) */
 /*!
@@ -29,1542 +438,955 @@
 //# sourceMappingURL=chart.umd.js.map
 
 </script>
-<style>
-  :root{
-    --bg: #12161d;
-    --panel: #1a2029;
-    --panel-line: #2a3341;
-    --ink: #e7ebf1;
-    --ink-dim: #8b96a5;
-    --temp: #e8975c;
-    --precip: #5b9bd9;
-    --wind: #6fcf97;
-    --mono: 'IBM Plex Mono', 'Courier New', monospace;
-    --disp: 'Fraunces', 'Georgia', serif;
-    --body: 'Inter', -apple-system, sans-serif;
-  }
-
-  @font-face{
-    font-family:'Fraunces';
-    src: local('Georgia');
-  }
-
-  *{box-sizing:border-box;}
-
-  html,body{
-    margin:0;
-    background:
-      radial-gradient(ellipse 900px 500px at 15% -10%, #1c2836 0%, transparent 60%),
-      var(--bg);
-    color:var(--ink);
-    font-family:var(--body);
-    min-height:100vh;
-  }
-
-  header{
-    padding: 22px clamp(16px,4vw,48px);
-    border-bottom: 1px solid var(--panel-line);
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    flex-wrap:wrap;
-    gap:16px;
-  }
-
-  .legend-bar{
-    display:flex;
-    gap:22px;
-    flex-wrap:wrap;
-    font-family:var(--mono);
-    font-size:11.5px;
-    color:var(--ink-dim);
-  }
-  .legend-bar span{display:flex;align-items:center;gap:7px;}
-  .swatch{width:11px;height:11px;border-radius:2px;}
-
-  .scale-toggle{
-    display:flex;
-    flex-wrap:wrap;
-    background:#12161d;
-    border:1px solid var(--panel-line);
-    border-radius:20px;
-    padding:3px;
-    gap:2px;
-    font-family:var(--mono);
-    font-size:11.5px;
-  }
-  .scale-toggle button{
-    appearance:none;
-    border:none;
-    background:transparent;
-    color:var(--ink-dim);
-    padding:6px 14px;
-    border-radius:16px;
-    cursor:pointer;
-    letter-spacing:.02em;
-    transition: background .15s ease, color .15s ease;
-  }
-  .scale-toggle button.active{
-    background:var(--wind);
-    color:#0e1218;
-    font-weight:600;
-  }
-  .scale-toggle button:not(.active):hover{ color:var(--ink); }
-
-  #day-nav button{ padding:6px 10px; }
-  .day-nav-label{
-    padding:6px 6px;
-    color:var(--ink-dim);
-    min-width:64px;
-    text-align:center;
-  }
-
-  .toggle-group{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    align-items:center;
-  }
-
-  .view-block{ display:none; }
-  .view-block.active{ display:block; }
-
-  .compare-card{
-    background:var(--panel);
-    border:1px solid var(--panel-line);
-    border-radius:10px;
-    padding:20px 20px 16px;
-    position:relative;
-    overflow:hidden;
-  }
-  .compare-card::before{
-    content:"";
-    position:absolute; top:0; left:0; right:0; height:2px;
-    background:linear-gradient(90deg, var(--temp), var(--precip), var(--wind));
-    opacity:.7;
-  }
-  .compare-chart-wrap{
-    position:relative;
-    height:min(60vh, 520px);
-    margin-top:6px;
-  }
-
-  .city-legend-header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    margin-top:22px;
-    padding-top:16px;
-    border-top:1px solid var(--panel-line);
-  }
-  .city-legend-title{
-    font-family:var(--mono);
-    font-size:11px;
-    letter-spacing:.04em;
-    text-transform:uppercase;
-    color:var(--ink-dim);
-  }
-  .legend-select-buttons{
-    display:flex;
-    gap:6px;
-  }
-  .legend-select-buttons button{
-    appearance:none;
-    border:1px solid var(--panel-line);
-    background:#12161d;
-    color:var(--ink-dim);
-    font-family:var(--mono);
-    font-size:11px;
-    padding:3px 11px;
-    border-radius:14px;
-    cursor:pointer;
-    transition: color .15s ease, border-color .15s ease;
-  }
-  .legend-select-buttons button:hover{
-    color:var(--ink);
-    border-color:var(--wind);
-  }
-  .city-legend{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px 22px;
-    margin-top:12px;
-  }
-  .city-legend-item{
-    display:flex;
-    align-items:center;
-    gap:8px;
-    font-family:var(--mono);
-    font-size:12px;
-    cursor:pointer;
-    user-select:none;
-    transition: opacity .15s ease;
-  }
-  .city-legend-item:has(input:not(:checked)){ opacity:.4; }
-  .city-legend-item input[type="checkbox"]{
-    appearance:none;
-    width:14px;height:14px;
-    border:1px solid var(--panel-line);
-    border-radius:4px;
-    background:#12161d;
-    cursor:pointer;
-    position:relative;
-    flex-shrink:0;
-  }
-  .city-legend-item input[type="checkbox"]:checked{
-    background:var(--wind);
-    border-color:var(--wind);
-  }
-  .city-legend-item input[type="checkbox"]:checked::after{
-    content:"";
-    position:absolute;
-    left:4px; top:1px;
-    width:3px; height:7px;
-    border:solid #0e1218;
-    border-width:0 2px 2px 0;
-    transform:rotate(45deg);
-  }
-  .city-legend-item .dot{
-    width:10px;height:10px;border-radius:50%;
-    flex-shrink:0;
-  }
-  .city-legend-item a{
-    color:var(--ink);
-    text-decoration:none;
-    border-bottom:1px dotted var(--panel-line);
-  }
-  .city-legend-item a:hover{ color:var(--wind); border-bottom-color:var(--wind); }
-  .city-legend-item .badge-mini{
-    color:var(--ink-dim);
-    font-size:10.5px;
-  }
-
-  .compare-hint{
-    font-family:var(--mono);
-    font-size:11px;
-    color:var(--ink-dim);
-    margin: 0 0 16px;
-  }
-
-  #grid{
-    padding: 28px clamp(16px,4vw,48px) 60px;
-    display:grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap:18px;
-  }
-  @media (max-width:1000px){ #grid{grid-template-columns:repeat(2,1fr);} }
-  @media (max-width:650px){ #grid{grid-template-columns:1fr;} }
-
-  .card{
-    background:var(--panel);
-    border:1px solid var(--panel-line);
-    border-radius:10px;
-    padding:18px 18px 14px;
-    display:flex;
-    flex-direction:column;
-    min-height:390px;
-    position:relative;
-    overflow:hidden;
-  }
-  .card::before{
-    content:"";
-    position:absolute; top:0; left:0; right:0; height:2px;
-    background:linear-gradient(90deg, var(--temp), var(--precip), var(--wind));
-    opacity:.7;
-  }
-
-  .search-row{
-    position:relative;
-    margin-bottom:12px;
-  }
-  .search-row input{
-    width:100%;
-    background:#12161d;
-    border:1px solid var(--panel-line);
-    border-radius:6px;
-    color:var(--ink);
-    font-family:var(--mono);
-    font-size:12px;
-    padding:8px 10px;
-    outline:none;
-    transition: border-color .15s ease;
-  }
-  .search-row input::placeholder{ color:#5a6472; }
-  .search-row input:focus{ border-color:var(--wind); }
-
-  .suggest-list{
-    position:absolute;
-    top:calc(100% + 4px);
-    left:0; right:0;
-    background:#151b24;
-    border:1px solid var(--panel-line);
-    border-radius:8px;
-    overflow:hidden;
-    z-index:20;
-    box-shadow:0 12px 28px rgba(0,0,0,0.45);
-  }
-  .suggest-list:empty{ display:none; }
-  .suggest-item{
-    padding:8px 10px;
-    cursor:pointer;
-    font-size:12.5px;
-    border-bottom:1px solid var(--panel-line);
-  }
-  .suggest-item:last-child{ border-bottom:none; }
-  .suggest-item:hover, .suggest-item.active{ background:#1f2733; }
-  .suggest-item .s-name{ color:var(--ink); font-weight:600; }
-  .suggest-item .s-meta{
-    display:block;
-    font-family:var(--mono);
-    font-size:10px;
-    color:var(--ink-dim);
-    margin-top:2px;
-  }
-  .suggest-item.s-empty{ color:var(--ink-dim); cursor:default; }
-  .suggest-item.s-empty:hover{ background:none; }
-
-  .card-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:flex-start;
-    margin-bottom:2px;
-  }
-  .place-name{
-    font-family:var(--disp);
-    font-size:19px;
-    font-weight:600;
-    line-height:1.15;
-  }
-  .place-name a{
-    color:inherit;
-    text-decoration:none;
-    border-bottom:1px dotted var(--panel-line);
-    transition: border-color .15s ease, color .15s ease;
-  }
-  .place-name a:hover{
-    color:var(--wind);
-    border-bottom-color:var(--wind);
-  }
-  .windy-link{
-    font-family:var(--mono);
-    font-size:9.5px;
-    font-weight:400;
-    color:var(--ink-dim) !important;
-    border:1px solid var(--panel-line) !important;
-    border-radius:10px;
-    padding:1px 7px;
-    margin-left:6px;
-    vertical-align:middle;
-    text-decoration:none;
-  }
-  .windy-link:hover{
-    color:var(--precip) !important;
-    border-color:var(--precip) !important;
-  }
-  .source-tag{
-    font-family:var(--mono);
-    font-size:9px;
-    color:var(--ink-dim);
-    vertical-align:super;
-    margin-left:2px;
-  }
-  .badge{
-    font-family:var(--mono);
-    font-size:9.5px;
-    letter-spacing:.1em;
-    text-transform:uppercase;
-    color:var(--ink-dim);
-    border:1px solid var(--panel-line);
-    border-radius:20px;
-    padding:3px 9px;
-    white-space:nowrap;
-    margin-left:8px;
-  }
-  .coords{
-    font-family:var(--mono);
-    font-size:10.5px;
-    color:var(--ink-dim);
-    margin-top:3px;
-    letter-spacing:.02em;
-  }
-
-  .now-row{
-    display:flex;
-    align-items:baseline;
-    gap:10px;
-    margin: 12px 0 8px;
-  }
-  .now-temp{
-    font-family:var(--disp);
-    font-size:34px;
-    font-weight:600;
-    color:var(--temp);
-  }
-  .now-detail{
-    font-family:var(--mono);
-    font-size:11px;
-    color:var(--ink-dim);
-    line-height:1.6;
-  }
-
-  .chart-wrap{
-    flex:1;
-    min-height:220px;
-    position:relative;
-    margin-top:4px;
-  }
-
-  .state{
-    font-family:var(--mono);
-    font-size:11.5px;
-    color:var(--ink-dim);
-    padding: 40px 0;
-    text-align:center;
-  }
-  .state.err{ color:#d9756b; }
-
-  footer{
-    padding: 0 clamp(16px,4vw,48px) 40px;
-    font-family:var(--mono);
-    font-size:10.5px;
-    color:var(--ink-dim);
-  }
-  footer a{ color:var(--ink-dim); }
-  .storage-warning{
-    color:#d9a05b;
-    margin: 0 0 8px;
-  }
-</style>
-</head>
-<body>
-
-<header>
-  <div class="legend-bar" id="cards-legend">
-    <span><span class="swatch" style="background:var(--temp)"></span>Température (min/max)</span>
-    <span><span class="swatch" style="background:var(--precip)"></span>Précipitations</span>
-    <span><span class="swatch" style="background:var(--wind)"></span>Vent — échelle de Beaufort</span>
-  </div>
-  <div class="toggle-group">
-    <div class="scale-toggle" role="group" aria-label="Affichage">
-      <button type="button" id="view-cards" class="active">Cartes</button>
-      <button type="button" id="view-compare">Comparaison</button>
-    </div>
-    <div class="scale-toggle" role="group" aria-label="Échelle de temps">
-      <button type="button" id="scale-jour" class="active">Jour</button>
-      <button type="button" id="scale-semaine">Semaine</button>
-    </div>
-    <div class="scale-toggle" id="day-nav" role="group" aria-label="Navigation jour" style="display:none;">
-      <button type="button" id="day-prev" aria-label="Jour précédent">◀</button>
-      <span id="day-nav-label" class="day-nav-label">Aujourd'hui</span>
-      <button type="button" id="day-next" aria-label="Jour suivant">▶</button>
-    </div>
-    <div class="scale-toggle" role="group" aria-label="Géolocalisation">
-      <button type="button" id="use-my-location" title="Remplace le lieu de la 1ère carte par votre position approximative">Ma position</button>
-    </div>
-    <div class="scale-toggle" id="install-group" style="display:none;">
-      <button type="button" id="install-app">Installer l'appli</button>
-    </div>
-  </div>
-</header>
-
-<main>
-  <div id="cardsView" class="view-block active">
-    <div id="grid"></div>
-  </div>
-
-  <div id="compareView" class="view-block" style="padding: 24px clamp(16px,4vw,48px) 60px;">
-    <div class="toggle-group" style="margin-bottom:16px;">
-      <div class="scale-toggle" role="group" aria-label="Grandeur affichée">
-        <button type="button" id="metric-temp" class="active">Température</button>
-        <button type="button" id="metric-feels">Ressenti</button>
-        <button type="button" id="metric-humidity">Humidité</button>
-        <button type="button" id="metric-precip">Précipitations</button>
-        <button type="button" id="metric-wind">Vent</button>
-        <button type="button" id="metric-gust">Rafales</button>
-        <button type="button" id="metric-cape">CAPE</button>
-        <button type="button" id="metric-freezing">Niveau de gel</button>
-        <button type="button" id="metric-aqi">Qualité de l'air</button>
-      </div>
-    </div>
-    <div class="compare-card">
-      <p class="compare-hint">Les 6 lieux superposés sur un même axe — chaque courbe garde l'heure locale de son fuseau. Pour changer un lieu, utilisez la recherche depuis la vue « Cartes ».</p>
-      <div class="compare-chart-wrap"><canvas id="compare-chart"></canvas></div>
-      <div class="city-legend-header">
-        <span class="city-legend-title">Lieux affichés</span>
-        <div class="legend-select-buttons">
-          <button type="button" id="select-all-cities">Tous</button>
-          <button type="button" id="select-none-cities">Aucun</button>
-        </div>
-      </div>
-      <div class="city-legend" id="city-legend"></div>
-    </div>
-  </div>
-</main>
-
-<footer>Données · Open‑Meteo.com — mise à jour à chaque chargement de page.</footer>
-
 <script>
-const LOCATIONS = [
-  { name:"Paris — 19e",     badge:"Ville",   lat:48.8809,  lon:2.3820,   tz:"Europe/Paris",
-    link:"https://www.meteoblue.com/en/weather/week/paris-19_france_6618625", source:"meteoblue" },
-  { name:"Rennes",          badge:"Ville",   lat:48.1173,  lon:-1.6778,  tz:"Europe/Paris",
-    link:"https://www.meteoblue.com/en/weather/week/rennes_france_2983990", source:"meteoblue" },
-  { name:"Saint-Malo",      badge:"Ville",   lat:48.6493,  lon:-2.0257,  tz:"Europe/Paris",
-    link:"https://www.meteoblue.com/en/weather/week/saint-malo_france_6454049", source:"meteoblue" },
-  { name:"Bruxelles",       badge:"Ville",   lat:50.8503,  lon:4.3517,   tz:"Europe/Brussels",
-    link:"https://www.meteoblue.com/en/weather/week/brussels_belgium_2800866", source:"meteoblue" },
-  { name:"Passo di Pontimia", badge:"Col · 2379 m", lat:46.1228, lon:8.1149, tz:"Europe/Zurich",
-    link:"https://www.yr.no/en/forecast/graph/2-11075416/Italy/Piedmont/Verbania/Passo%20di%20Pontimia", source:"yr.no" },
-  { name:"Pic d'Arrious",   badge:"Sommet · 2487 m", lat:42.8450, lon:-0.4450, tz:"Europe/Paris",
-    link:"https://www.yr.no/en/search?q=" + encodeURIComponent("Pic d'Arrious"), source:"yr.no" },
-];
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const filesRow = document.getElementById('filesRow');
+  const errorMsg = document.getElementById('errorMsg');
+  const statsRow = document.getElementById('statsRow');
+  const chartCard = document.getElementById('chartCard');
+  const chartSvg = document.getElementById('chartSvg');
+  const tooltip = document.getElementById('tooltip');
+  const footnote = document.getElementById('footnote');
+  const resetBtn = document.getElementById('resetBtn');
+  const actionsRow = document.getElementById('actionsRow');
+  const pushBtn = document.getElementById('pushBtn');
+  const actionsNote = document.getElementById('actionsNote');
+  const mapCard = document.getElementById('mapCard');
+  const weatherSection = document.getElementById('weatherSection');
+  const weatherGrid = document.getElementById('weatherGrid');
+  const transitSection = document.getElementById('transitSection');
+  const transitBody = document.getElementById('transitBody');
 
-const grid = document.getElementById('grid');
+  const COLORS = { a: { line: '#b5651d', fill: 'rgba(181,101,29,0.16)' }, b: { line: '#2f6165', fill: 'rgba(47,97,101,0.16)' } };
+  let tracks = []; // {name, xs, ys, stats, key}
+  let hidden = {};
 
-// Paramètres propres à chaque échelle de temps
-const SCALE_CONFIG = {
-  semaine: { forecastDays: 7, step: 3, windMod: 2, maxTicks: 14 },
-  jour:    { forecastDays: 1, step: 1, windMod: 3, maxTicks: 12 },
-};
-let currentScale = 'jour';
-let dayOffset = 0; // décalage en jours par rapport à aujourd'hui, utilisé uniquement en mode Jour
+  const isAndroid = /Android/i.test(navigator.userAgent);
 
-// Vue active ('cards' ou 'compare') et grandeur affichée en mode comparaison
-let currentView = 'cards';
-let currentMetric = 'temp';
-let compareChartInstance = null;
-
-const METRIC_CONFIG = {
-  temp:     { key:'temps',         label:'Température',    unit:'°C',   axisFmt:v=>v+'°',      tooltipFmt:v=>v.toFixed(1)+' °C' },
-  feels:    { key:'feelsSeries',   label:'Ressenti',        unit:'°C',   axisFmt:v=>v+'°',      tooltipFmt:v=>v.toFixed(1)+' °C' },
-  humidity: { key:'humiditySeries',label:'Humidité',        unit:'%',    axisFmt:v=>v+'%',      tooltipFmt:v=>Math.round(v)+' %' },
-  precip:   { key:'precs',         label:'Précipitations',  unit:'mm',   axisFmt:v=>v+'mm',     tooltipFmt:v=>v.toFixed(1)+' mm' },
-  wind:     { key:'windSeries',    label:'Vent (Beaufort)', unit:'Bf',   axisFmt:v=>'Bf '+v,    tooltipFmt:v=>'force '+Math.round(v)+' Bf' },
-  gust:     { key:'gustSeries',    label:'Rafales',         unit:'km/h', axisFmt:v=>v+'km/h',   tooltipFmt:v=>Math.round(v)+' km/h' },
-  cape:     { key:'capeSeries',    label:'CAPE',            unit:'J/kg', axisFmt:v=>v,          tooltipFmt:v=>Math.round(v)+' J/kg' },
-  freezing: { key:'freezingSeries',label:'Niveau de gel',   unit:'m',    axisFmt:v=>v,          tooltipFmt:v=>Math.round(v)+' m' },
-  aqi:      { key:'aqiSeries',     label:'Qualité de l’air', unit:'',    axisFmt:v=>v,          tooltipFmt:v=>'indice '+Math.round(v)+' (EU)' },
-};
-
-// Une couleur distincte par ville (pas par grandeur, ici) pour la vue superposée
-const CITY_COLORS = ['#e8975c', '#5b9bd9', '#6fcf97', '#c792ea', '#f2c94c', '#eb6f6f'];
-
-// Abréviations de jour à 3 lettres (dimanche = index 0, comme Date.getDay())
-const DAY3 = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-
-// État courant de chaque carte (mutable : remplacé lors d'une recherche)
-const currentLocations = LOCATIONS.map(l => ({ ...l }));
-const chartInstances = new Array(LOCATIONS.length).fill(null);
-const locationSeries = new Array(LOCATIONS.length).fill(null); // série complète par lieu, pour synchroniser les échelles et alimenter les 2 vues
-const locationVisible = new Array(LOCATIONS.length).fill(true); // affichage/masquage d'un lieu dans la vue Comparaison
-
-// Persistance de session (localStorage) : les 6 lieux (tous équivalents désormais)
-// + les choix d'affichage (échelle, vue, grandeur, cases cochées).
-// Note : Firefox bloque volontairement localStorage pour les pages ouvertes en file:// —
-// ce n'est pas un bug, la mémorisation ne fonctionnera dans ce cas que via un serveur local (http://).
-const SESSION_STORAGE_KEY = 'meteo-stations-session-v1';
-
-function isStorageAvailable(){
-  try{
-    const testKey = '__storage_test__';
-    localStorage.setItem(testKey, '1');
-    localStorage.removeItem(testKey);
-    return true;
-  }catch(e){
-    return false;
+  function escapeXml(s){
+    return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   }
-}
-const storageAvailable = isStorageAvailable();
 
-function saveSessionState(){
-  if(!storageAvailable) return;
-  try{
-    const state = {
-      locations: currentLocations.slice(0, 6),
-      scale: currentScale,
-      view: currentView,
-      metric: currentMetric,
-      visible: locationVisible
+  function buildCombinedGPX(allTracks){
+    const trkBlocks = allTracks.map(t => {
+      const pts = t.latlons.map((ll, i) => {
+        const ele = t.ys[i];
+        return `<trkpt lat="${ll[0]}" lon="${ll[1]}">${ele!=null && !Number.isNaN(ele) ? `<ele>${ele}</ele>` : ''}</trkpt>`;
+      }).join('');
+      return `<trk><name>${escapeXml(t.name)}</name><trkseg>${pts}</trkseg></trk>`;
+    }).join('');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Comparateur GPX" xmlns="http://www.topografix.com/GPX/1/1"><metadata><name>Comparaison des 2 traces</name></metadata>${trkBlocks}</gpx>`;
+  }
+
+  function pushToOsmAnd(allTracks){
+    const combined = buildCombinedGPX(allTracks);
+    const blob = new Blob([combined], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'comparaison-2-traces.gpx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  }
+
+  let leafletMap = null;
+
+  const SLOPE_COLOR_STOPS = [
+    { s: -25, c: [26, 111, 176] },  // blue — steep descent
+    { s: -8,  c: [58, 143, 92] },   // green
+    { s: 0,   c: [140, 132, 118] }, // gray — flat
+    { s: 8,   c: [214, 168, 34] },  // yellow
+    { s: 25,  c: [190, 58, 40] }    // red — steep ascent
+  ];
+  function slopeColor(slopePercent){
+    const stops = SLOPE_COLOR_STOPS;
+    const v = Math.max(stops[0].s, Math.min(stops[stops.length-1].s, slopePercent));
+    for (let i=0;i<stops.length-1;i++){
+      if (v >= stops[i].s && v <= stops[i+1].s){
+        const t = (v - stops[i].s) / (stops[i+1].s - stops[i].s);
+        const c0 = stops[i].c, c1 = stops[i+1].c;
+        const r = Math.round(c0[0] + (c1[0]-c0[0])*t);
+        const g = Math.round(c0[1] + (c1[1]-c0[1])*t);
+        const b = Math.round(c0[2] + (c1[2]-c0[2])*t);
+        return `rgb(${r},${g},${b})`;
+      }
+    }
+    return 'rgb(140,132,118)';
+  }
+
+  function pushToLeafletMap(allTracks){
+    mapCard.style.display = 'block';
+    mapCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    if (!leafletMap){
+      leafletMap = L.map('leafletMap');
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+      }).addTo(leafletMap);
+    } else {
+      leafletMap.eachLayer(layer => {
+        if (layer instanceof L.Polyline || layer instanceof L.CircleMarker) leafletMap.removeLayer(layer);
+      });
+    }
+
+    const allLatLngs = [];
+    allTracks.forEach(t => {
+      const latlngs = t.latlons.map(ll => [ll[0], ll[1]]);
+      // Colour each segment by its slope (rise/run) rather than a single flat colour per track
+      for (let i = 1; i < latlngs.length; i++){
+        const [lat0, lon0] = latlngs[i-1];
+        const [lat1, lon1] = latlngs[i];
+        const dist = haversine(lat0, lon0, lat1, lon1);
+        if (dist < 0.5) continue; // skip degenerate/duplicate points
+        const dEle = (t.ys[i] != null && t.ys[i-1] != null) ? (t.ys[i] - t.ys[i-1]) : 0;
+        const slopePct = (dEle / dist) * 100;
+        L.polyline([latlngs[i-1], latlngs[i]], { color: slopeColor(slopePct), weight: 4, opacity: 0.9 }).addTo(leafletMap);
+      }
+      L.circleMarker(latlngs[0], { radius: 5, color: COLORS[t.key].line, weight: 2, fillColor: '#fff', fillOpacity: 1 })
+        .addTo(leafletMap).bindTooltip(`${t.name} — départ`);
+      L.circleMarker(latlngs[latlngs.length-1], { radius: 5, color: COLORS[t.key].line, weight: 2, fillColor: COLORS[t.key].line, fillOpacity: 1 })
+        .addTo(leafletMap).bindTooltip(`${t.name} — arrivée`);
+      allLatLngs.push(...latlngs);
+    });
+
+    leafletMap.fitBounds(allLatLngs, { padding: [28, 28] });
+    setTimeout(() => leafletMap.invalidateSize(), 200);
+  }
+
+  function pushBothTracks(){
+    if (isAndroid) pushToOsmAnd(tracks); else pushToLeafletMap(tracks);
+  }
+
+  // ---- Weather (Open-Meteo.com) — 2 cards: start & end of the 1st track ----
+
+  const WEATHER_FORECAST_DAYS = 3;
+  const WEATHER_WIND_MOD = 4; // space wind arrows every N hours
+
+  const weatherChartInstances = [null, null];
+  const weatherSeriesCache = [null, null];
+
+  function kmhToBeaufort(kmh){
+    const ms = kmh / 3.6;
+    const bf = Math.pow(ms / 0.836, 2/3);
+    return Math.max(0, Math.min(12, bf));
+  }
+
+  function computeSharedWeatherRanges(){
+    let tempMin = Infinity, tempMax = -Infinity, precMax = 0;
+    weatherSeriesCache.forEach(s => {
+      if (!s) return;
+      s.temps.forEach(v => { if (v<tempMin) tempMin=v; if (v>tempMax) tempMax=v; });
+      s.precs.forEach(v => { if (v>precMax) precMax=v; });
+    });
+    if (!isFinite(tempMin) || !isFinite(tempMax)) return null;
+    const pad = Math.max(1, (tempMax-tempMin)*0.1);
+    return {
+      tempMin: Math.floor(tempMin-pad),
+      tempMax: Math.ceil(tempMax+pad),
+      precMax: Math.max(5, Math.ceil(precMax*1.15))
     };
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
-  }catch(e){
-    console.error('Sauvegarde de session impossible', e);
   }
-}
 
-function loadSessionState(){
-  if(!storageAvailable) return;
-  try{
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if(!raw) return;
-    const state = JSON.parse(raw);
-    if(Array.isArray(state.locations)){
-      state.locations.slice(0, 6).forEach((loc, idx) => { currentLocations[idx] = loc; });
+  const dayDividerPlugin = {
+    id:'dayDividers',
+    afterDraw(chart){
+      const opts = chart.config.options.plugins.dayDividers;
+      if (!opts || !opts.dividers) return;
+      const { ctx, chartArea, scales } = chart;
+      const xScale = scales.x;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(43,38,32,0.15)';
+      ctx.setLineDash([2,3]);
+      opts.dividers.forEach(d => {
+        const xPix = xScale.getPixelForValue(d.index);
+        ctx.beginPath();
+        ctx.moveTo(xPix, chartArea.top);
+        ctx.lineTo(xPix, chartArea.bottom+26);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#6b6250';
+      ctx.font = '600 10px IBM Plex Mono, monospace';
+      ctx.textAlign = 'left';
+      opts.labels.forEach(l => {
+        const xPix = xScale.getPixelForValue(l.index);
+        ctx.fillText(l.label, xPix+5, chartArea.top+11);
+      });
+      ctx.restore();
     }
-    if(state.scale === 'jour' || state.scale === 'semaine') currentScale = state.scale;
-    if(state.view === 'cards' || state.view === 'compare') currentView = state.view;
-    if(state.metric && METRIC_CONFIG[state.metric]) currentMetric = state.metric;
-    if(Array.isArray(state.visible)){
-      state.visible.forEach((v, idx) => { if(idx < locationVisible.length) locationVisible[idx] = !!v; });
-    }
-  }catch(e){
-    console.error('Lecture de session impossible', e);
-  }
-}
-loadSessionState();
-
-if(!storageAvailable){
-  const note = document.createElement('p');
-  note.className = 'storage-warning';
-  note.textContent = "Mémorisation indisponible dans ce contexte (souvent le cas sur Firefox lorsque la page est ouverte directement depuis un fichier local) — les choix ne seront pas retenus à la fermeture. Servez le fichier via un serveur local (ex. http://localhost) pour l'activer.";
-  document.querySelector('footer').prepend(note);
-}
-
-
-// Calcule une échelle température/précipitations commune à toutes les cartes affichées,
-// pour permettre une comparaison visuelle directe entre les lieux.
-function computeSharedRanges(){
-  let tempMin = Infinity, tempMax = -Infinity, precMax = 0;
-  locationSeries.forEach(s => {
-    if(!s) return;
-    s.temps.forEach(v => { if(v < tempMin) tempMin = v; if(v > tempMax) tempMax = v; });
-    s.precs.forEach(v => { if(v > precMax) precMax = v; });
-  });
-  if(!isFinite(tempMin) || !isFinite(tempMax)) return null;
-  const pad = Math.max(1, (tempMax - tempMin) * 0.1);
-  return {
-    tempMin: Math.floor(tempMin - pad),
-    tempMax: Math.ceil(tempMax + pad),
-    precMax: Math.max(5, Math.ceil(precMax * 1.15))
   };
-}
 
-// Construit (ou reconstruit) le graphe Chart.js d'une carte à partir de sa série mise en cache
-// et de l'échelle température/précipitations partagée. Reconstruire entièrement le graphe
-// (plutôt que de muter une instance existante) garantit que l'axe affiché et la courbe tracée
-// restent toujours parfaitement cohérents entre eux.
-function renderChart(idx, ranges){
-  const series = locationSeries[idx];
-  if(!series || typeof Chart === 'undefined') return;
-  const canvasEl = document.getElementById(`chart-${idx}`);
-  const stateEl = document.getElementById(`state-${idx}`);
-  stateEl.style.display = 'none';
-  canvasEl.style.display = 'block';
-
-  if(chartInstances[idx]){
-    chartInstances[idx].destroy();
-    chartInstances[idx] = null;
+  const windRowPlugin = {
+    id:'windRow',
+    afterDraw(chart){
+      const opts = chart.config.options.plugins.windRow;
+      if (!opts || !opts.points) return;
+      const { ctx, chartArea, scales } = chart;
+      const xScale = scales.x;
+      const y = chartArea.bottom+22;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(43,38,32,0.08)';
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, chartArea.bottom+8);
+      ctx.lineTo(chartArea.right, chartArea.bottom+8);
+      ctx.stroke();
+      ctx.restore();
+      opts.points.forEach(p => {
+        const xPix = xScale.getPixelForValue(p.index);
+        if (xPix < chartArea.left-1 || xPix > chartArea.right+1) return;
+        const angleRad = (p.dir+180)*Math.PI/180;
+        ctx.save();
+        ctx.translate(xPix, y);
+        ctx.rotate(angleRad);
+        ctx.strokeStyle = '#6a7d3f';
+        ctx.fillStyle = '#6a7d3f';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(0,6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,6); ctx.lineTo(-2.6,2); ctx.lineTo(2.6,2); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.fillStyle = '#8a8478';
+        ctx.font = '8.5px IBM Plex Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.round(p.speed), xPix, y+17);
+        ctx.restore();
+      });
+    }
+  };
+  if (typeof Chart !== 'undefined'){
+    try { Chart.register(dayDividerPlugin, windRowPlugin); } catch(e){ console.error("Chart.js: échec d'enregistrement des plugins", e); }
   }
 
-  const ctx2d = canvasEl.getContext('2d');
-  const tempFill = ctx2d.createLinearGradient(0,0,0,180);
-  tempFill.addColorStop(0, 'rgba(232,151,92,0.28)');
-  tempFill.addColorStop(1, 'rgba(232,151,92,0)');
+  function buildWeatherCardShell(point, idx){
+    const card = document.createElement('div');
+    card.className = 'wcard ' + (idx===0 ? 'start' : 'end');
+    card.innerHTML = `
+      <div class="wcard-head">
+        <div>
+          <div class="wcard-name">${escapeHtml(point.label)}</div>
+          <div class="wcard-coords">${Math.abs(point.lat).toFixed(3)}°${point.lat>=0?'N':'S'} · ${Math.abs(point.lon).toFixed(3)}°${point.lon>=0?'E':'O'}${point.ele!=null?` · ${Math.round(point.ele)} m`:''}</div>
+        </div>
+        <span class="wcard-badge">${idx===0?'Départ':'Arrivée'}</span>
+      </div>
+      <div id="wnow-${idx}"></div>
+      <div class="wcard-chart-wrap">
+        <div id="wstate-${idx}" class="wcard-state">Récupération des données…</div>
+        <canvas id="wchart-${idx}" style="display:none"></canvas>
+      </div>
+    `;
+    return card;
+  }
 
-  const { labels, temps, precs, windSeries, dividers, dayLabels, windPoints } = series;
+  function renderWeatherChart(idx, ranges){
+    const series = weatherSeriesCache[idx];
+    if (!series || typeof Chart === 'undefined') return;
+    const canvasEl = document.getElementById(`wchart-${idx}`);
+    const stateEl = document.getElementById(`wstate-${idx}`);
+    stateEl.style.display = 'none';
+    canvasEl.style.display = 'block';
 
-  chartInstances[idx] = new Chart(ctx2d, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          type: 'bar',
-          label: 'Précipitations (mm)',
-          data: precs,
-          backgroundColor: 'rgba(91,155,217,0.6)',
-          borderRadius: 2,
-          barPercentage: 0.65,
-          yAxisID: 'yPrecip',
-          order: 2
-        },
-        {
-          type: 'line',
-          label: 'Température (°C)',
-          data: temps,
-          borderColor: '#e8975c',
-          backgroundColor: tempFill,
-          fill: true,
-          pointRadius: 0,
-          pointHoverRadius: 3,
-          borderWidth: 2,
-          tension: 0.4,
-          yAxisID: 'yTemp',
-          order: 1
-        },
-        {
-          type: 'line',
-          label: 'Vent (km/h)',
-          data: windSeries,
-          borderColor: '#6fcf97',
-          backgroundColor: '#6fcf97',
-          borderDash: [4,2],
-          pointRadius: 0,
-          pointHoverRadius: 3,
-          borderWidth: 1.6,
-          tension: 0.4,
-          yAxisID: 'yWind',
-          order: 1
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: { padding: { top: 16, bottom: 34 } },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        dayDividers: { dividers, labels: dayLabels },
-        windRow: { points: windPoints },
-        tooltip: {
-          backgroundColor: '#0e1218',
-          titleFont: { family: 'IBM Plex Mono, monospace', size: 11 },
-          bodyFont: { family: 'IBM Plex Mono, monospace', size: 10.5 },
-          borderColor: '#2a3341',
-          borderWidth: 1,
-          padding: 8,
-          callbacks: {
-            label: (ctx) => {
-              if(ctx.dataset.yAxisID === 'yWind') return `Vent : force ${Math.round(ctx.parsed.y)} Beaufort`;
-              if(ctx.dataset.yAxisID === 'yPrecip') return `Précip. : ${ctx.parsed.y.toFixed(1)} mm`;
-              if(ctx.dataset.yAxisID === 'yTemp') return `Temp. : ${ctx.parsed.y.toFixed(1)} °C`;
-              return `${ctx.dataset.label} : ${ctx.parsed.y}`;
-            },
-            // Ajoute ressenti + humidité sous les lignes existantes, en piochant directement
-            // dans la série déjà en cache — aucune courbe ni axe supplémentaire nécessaire.
-            afterBody: (items) => {
-              if(!items.length) return [];
-              const i = items[0].dataIndex;
-              const lines = [];
-              if(series.feelsSeries && series.feelsSeries[i] != null) lines.push(`Ressenti : ${series.feelsSeries[i].toFixed(1)} °C`);
-              if(series.humiditySeries && series.humiditySeries[i] != null) lines.push(`Humidité : ${Math.round(series.humiditySeries[i])} %`);
-              if(series.gustSeries && series.gustSeries[i] != null) lines.push(`Rafales : ${Math.round(series.gustSeries[i])} km/h`);
-              if(series.capeSeries && series.capeSeries[i] != null) lines.push(`CAPE : ${Math.round(series.capeSeries[i])} J/kg`);
-              if(series.freezingSeries && series.freezingSeries[i] != null) lines.push(`Niveau de gel : ${Math.round(series.freezingSeries[i])} m`);
-              if(series.aqiSeries && series.aqiSeries[i] != null) lines.push(`Qualité de l’air : indice ${Math.round(series.aqiSeries[i])} (EU)`);
-              return lines;
+    if (weatherChartInstances[idx]){
+      weatherChartInstances[idx].destroy();
+      weatherChartInstances[idx] = null;
+    }
+
+    const ctx2d = canvasEl.getContext('2d');
+    const tempFill = ctx2d.createLinearGradient(0,0,0,180);
+    tempFill.addColorStop(0, 'rgba(193,68,14,0.25)');
+    tempFill.addColorStop(1, 'rgba(193,68,14,0)');
+
+    const { labels, temps, precs, windSeries, dividers, dayLabels, windPoints } = series;
+
+    weatherChartInstances[idx] = new Chart(ctx2d, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { type:'bar', label:'Précipitations (mm)', data:precs, backgroundColor:'rgba(59,110,143,0.55)', borderRadius:2, barPercentage:0.65, yAxisID:'yPrecip', order:2 },
+          { type:'line', label:'Température (°C)', data:temps, borderColor:'#c1440e', backgroundColor:tempFill, fill:true, pointRadius:0, pointHoverRadius:3, borderWidth:2, tension:0.4, yAxisID:'yTemp', order:1 },
+          { type:'line', label:'Vent (km/h)', data:windSeries, borderColor:'#6a7d3f', backgroundColor:'#6a7d3f', borderDash:[4,2], pointRadius:0, pointHoverRadius:3, borderWidth:1.6, tension:0.4, yAxisID:'yWind', order:1 }
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        layout:{ padding:{ top:16, bottom:34 } },
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{ display:false },
+          dayDividers:{ dividers, labels: dayLabels },
+          windRow:{ points: windPoints },
+          tooltip:{
+            backgroundColor:'#2b2620',
+            titleFont:{ family:'IBM Plex Mono, monospace', size:11 },
+            bodyFont:{ family:'IBM Plex Mono, monospace', size:10.5 },
+            borderColor:'#d3c7a8', borderWidth:1, padding:8,
+            callbacks:{
+              label:(ctx) => {
+                if (ctx.dataset.yAxisID==='yWind') return `Vent : force ${Math.round(ctx.parsed.y)} Beaufort`;
+                if (ctx.dataset.yAxisID==='yPrecip') return `Précip. : ${ctx.parsed.y.toFixed(1)} mm`;
+                if (ctx.dataset.yAxisID==='yTemp') return `Temp. : ${ctx.parsed.y.toFixed(1)} °C`;
+                return `${ctx.dataset.label} : ${ctx.parsed.y}`;
+              }
             }
           }
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            color:'#8b96a5',
-            font:{ family:'IBM Plex Mono, monospace', size:9.5 },
-            maxRotation:0,
-            autoSkip:true,
-            maxTicksLimit: SCALE_CONFIG[currentScale].maxTicks
-          },
-          grid: { display:false }
         },
-        yTemp: {
-          position:'left',
-          min: ranges ? ranges.tempMin : undefined,
-          max: ranges ? ranges.tempMax : undefined,
-          ticks: { color:'#e8975c', font:{ size:9.5 }, callback:v=>v+'°' },
-          grid: { color:'rgba(255,255,255,0.05)' }
-        },
-        yPrecip: {
-          position:'right',
-          min: 0,
-          max: ranges ? ranges.precMax : undefined,
-          ticks: { color:'#5b9bd9', font:{ size:9.5 }, callback:v=>v+'mm' },
-          grid: { display:false },
-          beginAtZero:true,
-          suggestedMax: 5
-        },
-        yWind: {
-          position:'right',
-          min: 0,
-          max: 12,
-          ticks: { color:'#6fcf97', font:{ size:9.5 }, stepSize:2, callback:v=>'Bf '+v },
-          grid: { display:false }
+        scales:{
+          x:{ ticks:{ color:'#6b6250', font:{ family:'IBM Plex Mono, monospace', size:9.5 }, maxRotation:0, autoSkip:true, maxTicksLimit:14 }, grid:{ display:false } },
+          yTemp:{ position:'left', min: ranges?ranges.tempMin:undefined, max: ranges?ranges.tempMax:undefined, ticks:{ color:'#c1440e', font:{ size:9.5 }, callback:v=>v+'°' }, grid:{ color:'rgba(43,38,32,0.06)' } },
+          yPrecip:{ position:'right', min:0, max: ranges?ranges.precMax:undefined, ticks:{ color:'#3b6e8f', font:{ size:9.5 }, callback:v=>v+'mm' }, grid:{ display:false }, beginAtZero:true },
+          yWind:{ position:'right', min:0, max:12, ticks:{ color:'#6a7d3f', font:{ size:9.5 }, stepSize:2, callback:v=>'Bf '+v }, grid:{ display:false } }
         }
       }
-    }
-  });
-}
-
-// Recalcule l'échelle commune et reconstruit tous les graphes déjà chargés avec cette
-// échelle identique, pour garder les cartes visuellement comparables entre elles.
-function syncAllCharts(){
-  const ranges = computeSharedRanges();
-  locationSeries.forEach((series, idx) => {
-    if(series) renderChart(idx, ranges);
-  });
-}
-
-// Reconstruit le graphique superposé (vue Comparaison) pour la grandeur actuellement sélectionnée.
-function renderCompareChart(){
-  renderCityLegend();
-  if(typeof Chart === 'undefined') return;
-  const canvas = document.getElementById('compare-chart');
-  if(!canvas) return;
-
-  if(compareChartInstance){
-    compareChartInstance.destroy();
-    compareChartInstance = null;
-  }
-
-  const metric = METRIC_CONFIG[currentMetric];
-  const datasets = [];
-  let labels = null;
-  let globalMin = Infinity, globalMax = -Infinity;
-
-  currentLocations.forEach((loc, idx) => {
-    const series = locationSeries[idx];
-    if(!series || !locationVisible[idx]) return;
-    if(!labels) labels = series.labels;
-    const values = series[metric.key];
-    values.forEach(v => { if(v == null) return; if(v < globalMin) globalMin = v; if(v > globalMax) globalMax = v; });
-    datasets.push({
-      label: loc.name,
-      data: values,
-      borderColor: CITY_COLORS[idx % CITY_COLORS.length],
-      backgroundColor: CITY_COLORS[idx % CITY_COLORS.length],
-      borderWidth: 2,
-      pointRadius: 0,
-      pointHoverRadius: 3,
-      tension: 0.4,
-      fill: false
     });
-  });
-
-  if(!labels){
-    // Aucun lieu coché : on récupère quand même des labels d'axe X depuis une série chargée,
-    // pour ne pas afficher un graphe totalement vide de repères.
-    const anySeries = locationSeries.find(s => s);
-    if(anySeries) labels = anySeries.labels;
   }
 
-  if(!labels) return; // aucune donnée chargée nulle part pour le moment
+  function syncWeatherCharts(){
+    const ranges = computeSharedWeatherRanges();
+    weatherSeriesCache.forEach((series, idx) => { if (series) renderWeatherChart(idx, ranges); });
+  }
 
-  // Les repères de jour (séparateurs + libellés 3 lettres) sont identiques d'un lieu à l'autre
-  // (même résolution, même point de départ local) : on les récupère d'une série quelconque déjà chargée.
-  const referenceSeries = locationSeries.find(s => s);
-  const dividers = referenceSeries ? referenceSeries.dividers : [];
-  const dayLabels = referenceSeries ? referenceSeries.dayLabels : [];
+  async function loadWeatherPoint(point, idx){
+    const stateEl = document.getElementById(`wstate-${idx}`);
+    const canvasEl = document.getElementById(`wchart-${idx}`);
+    const nowEl = document.getElementById(`wnow-${idx}`);
+    try{
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${point.lat}&longitude=${point.lon}` +
+        `&current=temperature_2m,precipitation,wind_speed_10m` +
+        `&hourly=temperature_2m,precipitation,wind_speed_10m,wind_direction_10m` +
+        `&timezone=auto&forecast_days=${WEATHER_FORECAST_DAYS}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
 
-  const hasVisibleData = isFinite(globalMin) && isFinite(globalMax);
-  const pad = hasVisibleData ? Math.max(0.5, (globalMax - globalMin) * 0.1) : 1;
-  const zeroFloor = ['wind','precip','humidity','gust','cape','freezing','aqi'].includes(currentMetric);
-  const yMin = currentMetric === 'wind' ? 0 : (zeroFloor ? 0 : (hasVisibleData ? Math.floor(globalMin - pad) : 0));
-  const yMax = currentMetric === 'wind' ? 12 : (currentMetric === 'humidity' ? 100 : (hasVisibleData ? Math.ceil(globalMax + pad) : 10));
+      nowEl.innerHTML = `
+        <div class="wcard-now">
+          <span class="wcard-now-temp">${Math.round(data.current.temperature_2m)}°</span>
+          <span class="wcard-now-detail">${data.current.precipitation.toFixed(1)} mm/h<br>${Math.round(data.current.wind_speed_10m)} km/h</span>
+        </div>`;
 
-  const ctx2d = canvas.getContext('2d');
-  compareChartInstance = new Chart(ctx2d, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: { padding: { top: 16, bottom: 6 } },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display:false },
-        dayDividers: { dividers, labels: dayLabels },
-        tooltip: {
-          backgroundColor: '#0e1218',
-          titleFont: { family:'IBM Plex Mono, monospace', size:11 },
-          bodyFont: { family:'IBM Plex Mono, monospace', size:10.5 },
-          borderColor: '#2a3341',
-          borderWidth: 1,
-          padding: 8,
-          callbacks: {
-            label: (ctx) => `${ctx.dataset.label} : ${metric.tooltipFmt(ctx.parsed.y)}`
-          }
+      const h = data.hourly;
+      const labels = h.time.map(t => {
+        const d = new Date(t);
+        return d.getHours().toString().padStart(2,'0') + 'h';
+      });
+      const temps = h.temperature_2m;
+      const precs = h.precipitation;
+      const windSeries = h.wind_speed_10m.map(kmhToBeaufort);
+
+      const dividers = [], dayLabels = [], windPoints = [];
+      h.time.forEach((time, i) => {
+        const d = new Date(time);
+        if (d.getHours() === 0){
+          dividers.push({ index:i });
+          dayLabels.push({ index:i, label: d.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric' }).replace('.','') });
         }
-      },
-      scales: {
-        x: {
-          ticks: {
-            color:'#8b96a5',
-            font:{ family:'IBM Plex Mono, monospace', size:9.5 },
-            maxRotation:0,
-            autoSkip:true,
-            maxTicksLimit: SCALE_CONFIG[currentScale].maxTicks
-          },
-          grid:{ display:false }
-        },
-        y: {
-          min: yMin,
-          max: yMax,
-          ticks:{ color:'#c7cfda', font:{ size:10.5 }, callback: metric.axisFmt },
-          grid:{ color:'rgba(255,255,255,0.05)' }
+        if (i % WEATHER_WIND_MOD === 0){
+          windPoints.push({ index:i, speed: Math.round(kmhToBeaufort(h.wind_speed_10m[i])), dir: h.wind_direction_10m[i] });
         }
+      });
+
+      if (typeof Chart === 'undefined'){
+        stateEl.textContent = 'Bibliothèque de graphiques indisponible.';
+        stateEl.classList.add('err');
+        return;
       }
+
+      weatherSeriesCache[idx] = { labels, temps, precs, windSeries, dividers, dayLabels, windPoints };
+      syncWeatherCharts();
+    } catch(err){
+      weatherSeriesCache[idx] = null;
+      stateEl.textContent = "Données indisponibles pour l'instant.";
+      stateEl.classList.add('err');
+      console.error(point.label, err);
     }
-  });
-}
-
-function setupCitySelectButtons(){
-  const allBtn = document.getElementById('select-all-cities');
-  const noneBtn = document.getElementById('select-none-cities');
-  if(!allBtn || !noneBtn) return;
-
-  function setAll(value){
-    for(let i = 0; i < locationVisible.length; i++) locationVisible[i] = value;
-    renderCompareChart();
-    saveSessionState();
   }
 
-  allBtn.addEventListener('click', () => setAll(true));
-  noneBtn.addEventListener('click', () => setAll(false));
-}
+  function loadWeatherForFirstTrack(track){
+    weatherSection.style.display = 'block';
+    weatherGrid.innerHTML = '';
+    weatherChartInstances[0] = weatherChartInstances[1] = null;
+    weatherSeriesCache[0] = weatherSeriesCache[1] = null;
 
-function renderCityLegend(){
-  const el = document.getElementById('city-legend');
-  if(!el) return;
-  el.innerHTML = currentLocations.map((loc, idx) => `
-    <label class="city-legend-item">
-      <input type="checkbox" class="city-toggle" data-idx="${idx}" ${locationVisible[idx] ? 'checked' : ''} />
-      <span class="dot" style="background:${CITY_COLORS[idx % CITY_COLORS.length]}"></span>
-      <a href="${loc.link}" target="_blank" rel="noopener" title="Voir sur ${loc.source}" onclick="event.stopPropagation()">${loc.name}</a>
-      <span class="badge-mini">${loc.badge}</span>
-    </label>
-  `).join('');
-
-  el.querySelectorAll('.city-toggle').forEach(input => {
-    input.addEventListener('change', () => {
-      const idx = Number(input.dataset.idx);
-      locationVisible[idx] = input.checked;
-      renderCompareChart();
-      saveSessionState();
-    });
-  });
-}
-
-// Redessine la vue actuellement affichée (cartes ou comparaison) — appelé après tout
-// changement de données pour ne jamais construire un graphique sur un canvas caché.
-function refreshCurrentView(){
-  if(currentView === 'cards'){
-    syncAllCharts();
-  } else {
-    renderCompareChart();
-  }
-}
-
-function setupViewToggle(){
-  const btnCards = document.getElementById('view-cards');
-  const btnCompare = document.getElementById('view-compare');
-  const cardsView = document.getElementById('cardsView');
-  const compareView = document.getElementById('compareView');
-  const cardsLegend = document.getElementById('cards-legend');
-
-  function activate(view){
-    if(view === currentView) return;
-    currentView = view;
-    btnCards.classList.toggle('active', view === 'cards');
-    btnCompare.classList.toggle('active', view === 'compare');
-    cardsView.classList.toggle('active', view === 'cards');
-    compareView.classList.toggle('active', view === 'compare');
-    cardsLegend.style.display = view === 'cards' ? 'flex' : 'none';
-    refreshCurrentView();
-    saveSessionState();
+    const startLL = track.latlons[0];
+    const endLL = track.latlons[track.latlons.length-1];
+    const points = [
+      { label: `Départ — ${track.name}`, lat: startLL[0], lon: startLL[1], ele: track.ys[0] },
+      { label: `Arrivée — ${track.name}`, lat: endLL[0], lon: endLL[1], ele: track.ys[track.ys.length-1] }
+    ];
+    points.forEach((p, idx) => weatherGrid.appendChild(buildWeatherCardShell(p, idx)));
+    points.forEach((p, idx) => loadWeatherPoint(p, idx));
   }
 
-  btnCards.addEventListener('click', () => activate('cards'));
-  btnCompare.addEventListener('click', () => activate('compare'));
-  // Synchronise l'affichage avec la vue courante (utile après restauration de session)
-  btnCards.classList.toggle('active', currentView === 'cards');
-  btnCompare.classList.toggle('active', currentView === 'compare');
-  cardsView.classList.toggle('active', currentView === 'cards');
-  compareView.classList.toggle('active', currentView === 'compare');
-  cardsLegend.style.display = currentView === 'cards' ? 'flex' : 'none';
-}
+  // ---- Nearest public transport (OpenStreetMap / Overpass API) ----
 
-function setupMetricToggle(){
-  const buttons = {
-    temp: document.getElementById('metric-temp'),
-    feels: document.getElementById('metric-feels'),
-    humidity: document.getElementById('metric-humidity'),
-    precip: document.getElementById('metric-precip'),
-    wind: document.getElementById('metric-wind'),
-    gust: document.getElementById('metric-gust'),
-    cape: document.getElementById('metric-cape'),
-    freezing: document.getElementById('metric-freezing'),
-    aqi: document.getElementById('metric-aqi'),
-  };
-  function activate(metric){
-    if(metric === currentMetric) return;
-    currentMetric = metric;
-    Object.entries(buttons).forEach(([key, btn]) => btn.classList.toggle('active', key === metric));
-    renderCompareChart();
-    saveSessionState();
-  }
-  Object.entries(buttons).forEach(([key, btn]) => btn.addEventListener('click', () => activate(key)));
-  // Synchronise l'affichage avec la grandeur courante (utile après restauration de session)
-  Object.entries(buttons).forEach(([key, btn]) => btn.classList.toggle('active', key === currentMetric));
-}
+  const TRANSIT_DEDUP_METERS = 400;
 
-// Recharge les 6 lieux depuis zéro (utilisé par le switch Jour/Semaine, la navigation
-// jour précédent/suivant, et la restauration depuis localStorage).
-function reloadAllLocations(){
-  currentLocations.forEach((loc, idx) => {
-    const stateEl = document.getElementById(`state-${idx}`);
-    const canvasEl = document.getElementById(`chart-${idx}`);
-    stateEl.style.display = 'block';
-    stateEl.classList.remove('err');
-    stateEl.textContent = 'Récupération des données…';
-    canvasEl.style.display = 'none';
-    locationSeries[idx] = null;
-    loadLocation(idx);
-  });
-}
-
-function setupScaleToggle(){
-  const btnSemaine = document.getElementById('scale-semaine');
-  const btnJour = document.getElementById('scale-jour');
-  const buttons = { semaine: btnSemaine, jour: btnJour };
-  const dayNav = document.getElementById('day-nav');
-
-  function activate(scale){
-    if(scale === currentScale) return;
-    currentScale = scale;
-    if(scale === 'jour') dayOffset = 0; // on repart d'aujourd'hui à chaque entrée en mode Jour
-    Object.entries(buttons).forEach(([key, btn]) => btn.classList.toggle('active', key === scale));
-    dayNav.style.display = scale === 'jour' ? 'flex' : 'none';
-    updateDayNavLabel();
-    reloadAllLocations();
-    saveSessionState();
-  }
-
-  btnSemaine.addEventListener('click', () => activate('semaine'));
-  btnJour.addEventListener('click', () => activate('jour'));
-  // Synchronise l'affichage des boutons avec l'échelle courante (utile après restauration de session)
-  Object.entries(buttons).forEach(([key, btn]) => btn.classList.toggle('active', key === currentScale));
-  dayNav.style.display = currentScale === 'jour' ? 'flex' : 'none';
-  updateDayNavLabel();
-}
-
-function updateDayNavLabel(){
-  const label = document.getElementById('day-nav-label');
-  if(!label) return;
-  if(dayOffset === 0) label.textContent = "Aujourd'hui";
-  else if(dayOffset > 0) label.textContent = `J+${dayOffset}`;
-  else label.textContent = `J${dayOffset}`;
-}
-
-function setupDayNav(){
-  const prevBtn = document.getElementById('day-prev');
-  const nextBtn = document.getElementById('day-next');
-  const DAY_MIN = -3, DAY_MAX = 6;
-
-  prevBtn.addEventListener('click', () => {
-    if(dayOffset <= DAY_MIN) return;
-    dayOffset -= 1;
-    updateDayNavLabel();
-    reloadAllLocations();
-    saveSessionState();
-  });
-  nextBtn.addEventListener('click', () => {
-    if(dayOffset >= DAY_MAX) return;
-    dayOffset += 1;
-    updateDayNavLabel();
-    reloadAllLocations();
-    saveSessionState();
-  });
-}
-
-// 6e case : tente de récupérer la position approximative du navigateur pour remplacer
-// le repli Rennes par défaut. Échec/refus silencieux : on reste simplement sur Rennes.
-// Bouton "Ma position" : remplace le lieu de la 1ère carte par la position du navigateur,
-// uniquement à la demande (sur clic), exactement comme un choix fait via la recherche.
-function useMyLocation(){
-  const idx = 0;
-  const btn = document.getElementById('use-my-location');
-
-  if(!('geolocation' in navigator)){
-    if(btn){
-      const original = btn.textContent;
-      btn.textContent = 'Non supporté';
-      setTimeout(() => { btn.textContent = original; }, 2500);
-    }
-    return;
-  }
-
-  if(btn){ btn.disabled = true; btn.textContent = 'Localisation…'; }
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const loc = {
-        name: "Ma position",
-        badge: "Position estimée",
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "auto",
-        link: buildWindyLink(pos.coords.latitude, pos.coords.longitude),
-        source: "Windy"
-      };
-      currentLocations[idx] = loc;
-      updateCardHead(idx, loc);
-
-      if(chartInstances[idx]){
-        chartInstances[idx].destroy();
-        chartInstances[idx] = null;
-      }
-      locationSeries[idx] = null;
-      const stateEl = document.getElementById(`state-${idx}`);
-      const canvasEl = document.getElementById(`chart-${idx}`);
-      stateEl.style.display = 'block';
-      stateEl.classList.remove('err');
-      stateEl.textContent = 'Récupération des données…';
-      canvasEl.style.display = 'none';
-      loadLocation(idx);
-      saveSessionState();
-
-      if(btn){ btn.disabled = false; btn.textContent = 'Ma position'; }
+  // Manually researched & verified results (see conversation) — used whenever a départ/arrivée
+  // point falls within `radius` of one of these known locations, since automatic OSM tag lookup
+  // can miss reservation-based rural services (e.g. seasonal on-call minibuses) or lack a
+  // reliable operator link. Any point outside these zones falls back to the live Overpass search.
+  const VERIFIED_TRANSIT_POINTS = [
+    {
+      lat: 46.1622, lon: 8.1145, radius: 700,
+      name: 'Zwischbergen, Bord',
+      stopLat: 46.1622, stopLon: 8.1145,
+      distanceText: 'arrêt au hameau',
+      linkLabel: 'PostAuto — PubliCar Zwischbergen (été, réservation)',
+      url: 'https://www.postauto.ch/de/publicar-zwischbergen-sommer-vs'
     },
-    (err) => {
-      console.error('Géolocalisation refusée/indisponible', err);
-      if(btn){
-        btn.disabled = false;
-        btn.textContent = 'Refusée';
-        setTimeout(() => { btn.textContent = 'Ma position'; }, 2500);
-      }
-    },
-    { timeout: 8000 }
-  );
-}
-
-function setupGeolocationButton(){
-  const btn = document.getElementById('use-my-location');
-  if(!btn) return;
-  btn.addEventListener('click', useMyLocation);
-}
-
-// Conversion vitesse (km/h) -> échelle de Beaufort
-// Formule standard : v(m/s) = 0.836 * Bf^1.5  =>  Bf = (v/0.836)^(2/3)
-function kmhToBeaufort(kmh){
-  const ms = kmh / 3.6;
-  const bf = Math.pow(ms / 0.836, 2/3);
-  return Math.max(0, Math.min(12, bf));
-}
-
-function buildBadge(r){
-  const parts = [];
-  if(r.admin1 && r.admin1 !== r.name) parts.push(r.admin1);
-  if(r.country) parts.push(r.country);
-  let badge = parts.join(', ');
-  if(r.elevation && r.elevation > 300){
-    badge += (badge ? ' · ' : '') + Math.round(r.elevation) + ' m';
-  }
-  return badge || 'Lieu';
-}
-
-function slugify(str){
-  return (str || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire les accents
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-// Lien Windy (calque Pluie/Tonnerre, zoom 8) sur le format officiel :
-// https://www.windy.com/{lat}/{lon}?{calque},{AAAA-MM-JJ-HH},{lat},{lon},{zoom}
-function buildWindyLink(lat, lon){
-  const latR = lat.toFixed(3), lonR = lon.toFixed(3);
-  const now = new Date();
-  const pad = n => String(n).padStart(2,'0');
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}-${pad(now.getHours())}`;
-  return `https://www.windy.com/${latR}/${lonR}?rain,${stamp},${latR},${lonR},8`;
-}
-
-// meteoblue référence surtout les lieux habités (codes commençant par "P").
-// Pour le reste (sommets, cols, lacs, îles…), on renvoie vers la recherche yr.no.
-function buildWeatherLink(r){
-  const isPopulatedPlace = (r.feature_code || '').startsWith('P');
-  if(isPopulatedPlace && r.id){
-    const slug = [slugify(r.name), slugify(r.country)].filter(Boolean).join('_');
-    return {
-      link: `https://www.meteoblue.com/en/weather/week/${slug}_${r.id}`,
-      source: 'meteoblue'
-    };
-  }
-  return {
-    link: `https://www.yr.no/en/search?q=${encodeURIComponent(r.name)}`,
-    source: 'yr.no'
-  };
-}
-
-function updateCardHead(idx, loc){
-  const nameLink = document.getElementById(`place-name-${idx}`);
-  nameLink.textContent = loc.name;
-  nameLink.href = loc.link;
-  nameLink.title = `Voir sur ${loc.source}`;
-  const windyLink = document.getElementById(`windy-link-${idx}`);
-  if(windyLink) windyLink.href = buildWindyLink(loc.lat, loc.lon);
-  document.getElementById(`badge-${idx}`).textContent = loc.badge;
-  document.getElementById(`coords-${idx}`).textContent =
-    `${Math.abs(loc.lat).toFixed(2)}°${loc.lat>=0?'N':'S'} · ${Math.abs(loc.lon).toFixed(2)}°${loc.lon>=0?'E':'O'}`;
-}
-
-async function searchPlaces(query){
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=6&language=fr&format=json`;
-  const res = await fetch(url);
-  if(!res.ok) return [];
-  const data = await res.json();
-  return data.results || [];
-}
-
-function renderSuggestions(idx, results){
-  const list = document.getElementById(`suggest-${idx}`);
-  list.innerHTML = '';
-  if(!results.length){
-    list.innerHTML = `<div class="suggest-item s-empty">Aucun résultat</div>`;
-    return;
-  }
-  results.forEach(r => {
-    const item = document.createElement('div');
-    item.className = 'suggest-item';
-    const meta = [r.admin1, r.country].filter(Boolean).join(', ');
-    item.innerHTML = `<span class="s-name">${r.name}</span><span class="s-meta">${meta}</span>`;
-    item.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // évite que le blur de l'input ne ferme la liste avant le clic
-      selectPlace(idx, r);
-    });
-    list.appendChild(item);
-  });
-}
-
-function selectPlace(idx, r){
-  const { link, source } = buildWeatherLink(r);
-  const loc = {
-    name: r.name,
-    badge: buildBadge(r),
-    lat: r.latitude,
-    lon: r.longitude,
-    tz: r.timezone || 'auto',
-    link,
-    source
-  };
-  currentLocations[idx] = loc;
-  updateCardHead(idx, loc);
-
-  const input = document.getElementById(`search-${idx}`);
-  input.value = '';
-  document.getElementById(`suggest-${idx}`).innerHTML = '';
-
-  if(chartInstances[idx]){
-    chartInstances[idx].destroy();
-    chartInstances[idx] = null;
-  }
-  locationSeries[idx] = null;
-  const stateEl = document.getElementById(`state-${idx}`);
-  const canvasEl = document.getElementById(`chart-${idx}`);
-  stateEl.style.display = 'block';
-  stateEl.classList.remove('err');
-  stateEl.textContent = 'Récupération des données…';
-  canvasEl.style.display = 'none';
-
-  loadLocation(idx);
-  saveSessionState();
-}
-
-function setupSearch(idx){
-  const input = document.getElementById(`search-${idx}`);
-  let debounceTimer = null;
-  input.addEventListener('input', () => {
-    const q = input.value.trim();
-    clearTimeout(debounceTimer);
-    if(q.length < 2){
-      document.getElementById(`suggest-${idx}`).innerHTML = '';
-      return;
+    {
+      lat: 46.1211, lon: 8.1027, radius: 700,
+      name: 'Zwischbergen, Bord',
+      stopLat: 46.1622, stopLon: 8.1145,
+      distanceText: "alpage isolé, non desservi — redescendre à Bord",
+      linkLabel: 'PostAuto — PubliCar Zwischbergen (été, réservation)',
+      url: 'https://www.postauto.ch/de/publicar-zwischbergen-sommer-vs'
     }
-    debounceTimer = setTimeout(async () => {
+  ];
+
+  // Link on the stop's own name → its position, OsmAnd (geo: URI) on Android, OpenStreetMap pin otherwise
+  function stopLocationLink(lat, lon){
+    if (lat == null || lon == null) return null;
+    return isAndroid
+      ? `geo:${lat},${lon}?z=17`
+      : `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
+  }
+
+  function checkVerifiedTransit(lat, lon){
+    for (const p of VERIFIED_TRANSIT_POINTS){
+      if (haversine(lat, lon, p.lat, p.lon) <= p.radius) return p;
+    }
+    return null;
+  }
+
+  const TRANSIT_OPERATOR_LINKS = [
+    { match: /postauto|carpostal|autopostale/i, url: 'https://www.postauto.ch' },
+    { match: /\bsbb\b|\bcff\b|\bffs\b/i,          url: 'https://www.sbb.ch' },
+    { match: /\bbls\b/i,                          url: 'https://www.bls.ch' },
+    { match: /matterhorn.?gotthard|\bmgb\b/i,     url: 'https://www.mgbahn.ch' },
+    { match: /\btpg\b/i,                           url: 'https://www.tpg.ch' },
+    { match: /\btpf\b/i,                           url: 'https://www.tpf.ch' },
+    { match: /trenitalia|\brfi\b/i,                url: 'https://www.trenitalia.com' },
+    { match: /\bratp\b/i,                          url: 'https://www.ratp.fr' },
+    { match: /\bsncf\b/i,                          url: 'https://www.sncf.com' },
+    { match: /\bdb\b|deutsche bahn/i,              url: 'https://www.bahn.de' },
+    { match: /\bobb\b|österreichische bundesbahn/i, url: 'https://www.oebb.at' }
+  ];
+
+  const OVERPASS_ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.openstreetmap.ru/api/interpreter'
+  ];
+
+  async function fetchWithTimeout(url, options, ms){
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try{
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function findNearestTransit(lat, lon){
+    const query = `[out:json][timeout:20];(node["highway"="bus_stop"](around:3000,${lat},${lon});node["railway"~"station|halt|tram_stop"](around:6000,${lat},${lon});node["public_transport"](around:3000,${lat},${lon}););out body;`;
+    let lastErr = null;
+
+    for (const endpoint of OVERPASS_ENDPOINTS){
       try{
-        const results = await searchPlaces(q);
-        renderSuggestions(idx, results);
-      }catch(e){
-        console.error('Recherche de lieu impossible', e);
+        const res = await fetchWithTimeout(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query)
+        }, 12000);
+        if (!res.ok) throw new Error(`${endpoint.split('/')[2]} → HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.elements || !data.elements.length) throw new Error('aucun arrêt dans le rayon de recherche');
+
+        let best = null, bestDist = Infinity;
+        data.elements.forEach(el => {
+          if (el.type !== 'node' || !el.tags) return;
+          const d = haversine(lat, lon, el.lat, el.lon);
+          if (d < bestDist){
+            bestDist = d;
+            best = {
+              id: el.id, lat: el.lat, lon: el.lon,
+              name: el.tags.name || el.tags.ref || 'Arrêt sans nom',
+              operator: el.tags.operator || '',
+              network: el.tags.network || '',
+              distanceText: `${Math.round(d)} m`
+            };
+          }
+        });
+        if (!best) throw new Error('aucun arrêt exploitable dans la réponse');
+        const link = (() => {
+          const hay = `${best.operator||''} ${best.network||''}`;
+          for (const o of TRANSIT_OPERATOR_LINKS){
+            if (o.match.test(hay)) return { url: o.url, label: best.operator || best.network };
+          }
+          return { url: `https://www.openstreetmap.org/node/${best.id}`, label: 'Fiche OpenStreetMap' };
+        })();
+        return { name: best.name, distanceText: best.distanceText, url: link.url, linkLabel: link.label, stopLat: best.lat, stopLon: best.lon, verified: false };
+      } catch(err){
+        lastErr = (err && err.name === 'AbortError') ? new Error(`${endpoint.split('/')[2]} → délai dépassé`) : err;
+        console.error('Overpass lookup failed for', endpoint, err);
       }
-    }, 300);
-  });
-  input.addEventListener('blur', () => {
-    setTimeout(() => { document.getElementById(`suggest-${idx}`).innerHTML = ''; }, 150);
-  });
-}
-
-function buildCardShell(loc, idx){
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.innerHTML = `
-    <div class="search-row">
-      <input type="text" id="search-${idx}" placeholder="Rechercher un lieu…" autocomplete="off" />
-      <div id="suggest-${idx}" class="suggest-list"></div>
-    </div>
-    <div class="card-head">
-      <div>
-        <div class="place-name">
-          <a id="place-name-${idx}" href="${loc.link}" target="_blank" rel="noopener" title="Voir sur ${loc.source}">${loc.name}</a>
-          <a class="windy-link" id="windy-link-${idx}" href="${buildWindyLink(loc.lat, loc.lon)}" target="_blank" rel="noopener" title="Voir sur Windy (pluie/tonnerre)">Windy</a>
-        </div>
-        <div class="coords" id="coords-${idx}">${Math.abs(loc.lat).toFixed(2)}°${loc.lat>=0?'N':'S'} · ${Math.abs(loc.lon).toFixed(2)}°${loc.lon>=0?'E':'O'}</div>
-      </div>
-      <span class="badge" id="badge-${idx}">${loc.badge}</span>
-    </div>
-    <div id="now-${idx}"></div>
-    <div class="chart-wrap"><div id="state-${idx}" class="state">Récupération des données…</div><canvas id="chart-${idx}" style="display:none"></canvas></div>
-  `;
-  grid.appendChild(card);
-  setupSearch(idx);
-}
-
-// --- Plugins pour reproduire le style "meteogramme" de yr.no ---
-// Séparateurs / étiquettes de jour au-dessus du graphe
-const dayDividerPlugin = {
-  id:'dayDividers',
-  afterDraw(chart){
-    const opts = chart.config.options.plugins.dayDividers;
-    if(!opts || !opts.dividers) return;
-    const { ctx, chartArea, scales } = chart;
-    const xScale = scales.x;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
-    ctx.setLineDash([2,3]);
-    opts.dividers.forEach(d=>{
-      const xPix = xScale.getPixelForValue(d.index);
-      ctx.beginPath();
-      ctx.moveTo(xPix, chartArea.top);
-      ctx.lineTo(xPix, chartArea.bottom + 26);
-      ctx.stroke();
-    });
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#c7cfda';
-    ctx.font = '600 10px IBM Plex Mono, monospace';
-    ctx.textAlign = 'left';
-    opts.labels.forEach(l=>{
-      const xPix = xScale.getPixelForValue(l.index);
-      ctx.fillText(l.label, xPix + 5, chartArea.top + 11);
-    });
-    ctx.restore();
+    }
+    throw lastErr || new Error('tous les serveurs Overpass ont échoué');
   }
-};
 
-// Rangée de flèches de vent (direction + vitesse) sous le graphe, comme yr.no
-const windRowPlugin = {
-  id:'windRow',
-  afterDraw(chart){
-    const opts = chart.config.options.plugins.windRow;
-    if(!opts || !opts.points) return;
-    const { ctx, chartArea, scales } = chart;
-    const xScale = scales.x;
-    const y = chartArea.bottom + 22;
+  async function loadTransitOptions(allTracks){
+    transitSection.style.display = 'block';
+    transitBody.innerHTML = '<tr><td colspan="4" class="transit-loading">Recherche des arrêts les plus proches…</td></tr>';
 
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.beginPath();
-    ctx.moveTo(chartArea.left, chartArea.bottom + 8);
-    ctx.lineTo(chartArea.right, chartArea.bottom + 8);
-    ctx.stroke();
-    ctx.restore();
-
-    opts.points.forEach(p=>{
-      const xPix = xScale.getPixelForValue(p.index);
-      if(xPix < chartArea.left - 1 || xPix > chartArea.right + 1) return;
-      const angleRad = (p.dir + 180) * Math.PI / 180; // sens vers lequel le vent souffle
-
-      ctx.save();
-      ctx.translate(xPix, y);
-      ctx.rotate(angleRad);
-      ctx.strokeStyle = '#6fcf97';
-      ctx.fillStyle = '#6fcf97';
-      ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.moveTo(0, -6);
-      ctx.lineTo(0, 6);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, 6);
-      ctx.lineTo(-2.6, 2);
-      ctx.lineTo(2.6, 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.fillStyle = '#8b96a5';
-      ctx.font = '8.5px IBM Plex Mono, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(Math.round(p.speed), xPix, y + 17);
-      ctx.restore();
+    // Collect départ/arrivée for every track, then merge points that are essentially the same place
+    const rawPoints = [];
+    allTracks.forEach(t => {
+      const startLL = t.latlons[0], endLL = t.latlons[t.latlons.length-1];
+      rawPoints.push({ role: 'Départ', track: t.name, lat: startLL[0], lon: startLL[1] });
+      rawPoints.push({ role: 'Arrivée', track: t.name, lat: endLL[0], lon: endLL[1] });
     });
-  }
-};
-if (typeof Chart !== 'undefined') {
-  try { Chart.register(dayDividerPlugin, windRowPlugin); } catch(e) { console.error('Chart.js: échec de l’enregistrement des plugins', e); }
-} else {
-  console.error('Chart.js indisponible');
-}
 
-async function loadLocation(idx){
-  const loc = currentLocations[idx];
-  const stateEl = document.getElementById(`state-${idx}`);
-  const canvasEl = document.getElementById(`chart-${idx}`);
-  const nowEl = document.getElementById(`now-${idx}`);
-  try{
-    // En mode Jour, on peut naviguer vers un jour différent d'aujourd'hui (dayOffset).
-    // En mode Semaine, ces valeurs restent celles d'origine (pastDays=0, forecastDays=7).
-    let forecastDays = SCALE_CONFIG[currentScale].forecastDays;
-    let pastDays = 0;
-    let dayStartIndex = 0; // position, dans le tableau horaire renvoyé, du début du jour ciblé
-    if(currentScale === 'jour'){
-      if(dayOffset >= 0){
-        forecastDays = dayOffset + 1;
-        dayStartIndex = dayOffset * 24;
+    const clusters = [];
+    rawPoints.forEach(p => {
+      const existing = clusters.find(c => haversine(c.lat, c.lon, p.lat, p.lon) < TRANSIT_DEDUP_METERS);
+      if (existing) existing.entries.push(p); else clusters.push({ lat: p.lat, lon: p.lon, entries: [p] });
+    });
+
+    clusters.forEach(c => {
+      const roles = new Set(c.entries.map(e => e.role));
+      c.displayLabel = (roles.size === 1 && c.entries.length === allTracks.length)
+        ? `${[...roles][0]} (${allTracks.length} traces)`
+        : c.entries.map(e => `${e.role} — ${e.track}`).join(' · ');
+    });
+
+    const results = await Promise.all(clusters.map(async c => {
+      const verified = checkVerifiedTransit(c.lat, c.lon);
+      if (verified) return { cluster: c, stop: { ...verified, verified: true }, error: null };
+      try { return { cluster: c, stop: await findNearestTransit(c.lat, c.lon), error: null }; }
+      catch (err) { return { cluster: c, stop: null, error: err }; }
+    }));
+
+    // Two geographically distinct points (e.g. départ & arrivée) can still resolve to the
+    // very same transit stop (typical when the endpoint itself has no closer alternative).
+    // In that case, show a single merged row rather than repeating the identical stop/link.
+    function combineLabels(labels){
+      if (labels.length === 2){
+        const re = /^(Départ|Arrivée) \((\d+) traces\)$/;
+        const m0 = labels[0].match(re), m1 = labels[1].match(re);
+        if (m0 && m1 && m0[2] === m1[2] && m0[1] !== m1[1]) return `Départ et arrivée (${m0[2]} traces)`;
+      }
+      return [...new Set(labels)].join(' + ');
+    }
+
+    const merged = [];
+    results.forEach(r => {
+      const key = (r.stop && !r.error) ? `${r.stop.name}|${r.stop.url}` : null;
+      const existing = key ? merged.find(m => m.key === key) : null;
+      if (existing){
+        existing.labels.push(r.cluster.displayLabel);
+        if (r.stop.distanceText && !existing.distanceTexts.includes(r.stop.distanceText)){
+          existing.distanceTexts.push(r.stop.distanceText);
+        }
       } else {
-        pastDays = -dayOffset;
-        forecastDays = 1;
-        dayStartIndex = 0; // le jour ciblé (le plus ancien demandé) commence au tout début du tableau
-      }
-    }
-
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
-      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,wind_speed_10m,wind_gusts_10m` +
-      `&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cape,freezinglevel_height` +
-      `&timezone=${encodeURIComponent(loc.tz)}&forecast_days=${forecastDays}&past_days=${pastDays}`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-
-    const h = data.hourly;
-
-    if(currentScale === 'jour' && dayOffset !== 0){
-      // On regarde un autre jour qu'aujourd'hui : les conditions "actuelles" n'ont plus de sens,
-      // on affiche un résumé du jour ciblé (min/max, cumul de pluie) à la place.
-      const dayTemps = h.temperature_2m.slice(dayStartIndex, dayStartIndex + 24);
-      const dayPrecip = h.precipitation.slice(dayStartIndex, dayStartIndex + 24);
-      const dayDate = new Date(h.time[dayStartIndex]);
-      const dateLabel = dayDate.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'short' });
-      nowEl.innerHTML = `
-        <div class="now-row">
-          <span class="now-temp">${Math.round(Math.max(...dayTemps))}°</span>
-          <span class="now-detail">${dateLabel}<br>min ${Math.round(Math.min(...dayTemps))}° · cumul pluie ${dayPrecip.reduce((a,b)=>a+b,0).toFixed(1)} mm</span>
-        </div>`;
-    } else {
-      nowEl.innerHTML = `
-        <div class="now-row">
-          <span class="now-temp">${Math.round(data.current.temperature_2m)}°</span>
-          <span class="now-detail">Ressenti ${Math.round(data.current.apparent_temperature)}° · ${Math.round(data.current.relative_humidity_2m)}% hum.<br>${data.current.precipitation.toFixed(1)} mm/h · ${Math.round(data.current.wind_speed_10m)} km/h (rafales ${Math.round(data.current.wind_gusts_10m)})</span>
-        </div>`;
-    }
-
-    const STEP = SCALE_CONFIG[currentScale].step; // résolution temporelle selon l'échelle active
-    const windowEnd = (currentScale === 'jour') ? Math.min(dayStartIndex + 24, h.time.length) : h.time.length;
-    const windowStart = (currentScale === 'jour') ? dayStartIndex : 0;
-    const sampleIdx = [];
-    for(let i = windowStart; i < windowEnd; i += STEP) sampleIdx.push(i);
-
-    const labels = sampleIdx.map(i => {
-      const d = new Date(h.time[i]);
-      return d.getHours().toString().padStart(2,'0') + 'h';
-    });
-    const temps = sampleIdx.map(i => h.temperature_2m[i]);
-    const precs = sampleIdx.map(i => h.precipitation[i]);
-    const windSeries = sampleIdx.map(i => kmhToBeaufort(h.wind_speed_10m[i]));
-    const feelsSeries = sampleIdx.map(i => h.apparent_temperature[i]);
-    const humiditySeries = sampleIdx.map(i => h.relative_humidity_2m[i]);
-    const gustSeries = sampleIdx.map(i => h.wind_gusts_10m[i]);
-    const capeSeries = sampleIdx.map(i => h.cape[i]);
-    const freezingSeries = sampleIdx.map(i => h.freezinglevel_height[i]);
-
-    // Qualité de l'air : API séparée (air-quality-api.open-meteo.com), plafonnée à 5 jours.
-    // Isolée dans son propre try/catch : si elle échoue, le reste de la carte reste fonctionnel.
-    let aqiSeries = sampleIdx.map(() => null);
-    try {
-      const aqDays = Math.min(forecastDays, 5);
-      const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lon}` +
-        `&hourly=european_aqi&timezone=${encodeURIComponent(loc.tz)}&forecast_days=${aqDays}&past_days=${pastDays}`;
-      const aqRes = await fetch(aqUrl);
-      if(aqRes.ok){
-        const aq = await aqRes.json();
-        const aqiByTime = {};
-        aq.hourly.time.forEach((t, i) => { aqiByTime[t] = aq.hourly.european_aqi[i]; });
-        aqiSeries = sampleIdx.map(i => {
-          const t = h.time[i];
-          return (t in aqiByTime) ? aqiByTime[t] : null;
+        merged.push({
+          key, labels: [r.cluster.displayLabel], stop: r.stop, error: r.error,
+          distanceTexts: r.stop ? [r.stop.distanceText] : []
         });
       }
-    } catch(aqErr) {
-      console.error('Qualité de l’air indisponible pour', loc.name, aqErr);
-    }
-
-    const dividers = [];
-    const dayLabels = [];
-    const windPoints = [];
-    sampleIdx.forEach((origI, localI) => {
-      const d = new Date(h.time[origI]);
-      if(d.getHours() === 0){
-        dividers.push({ index: localI });
-        dayLabels.push({ index: localI, label: DAY3[d.getDay()] + ' ' + d.getDate() });
-      }
-      if(localI % SCALE_CONFIG[currentScale].windMod === 0){ // espacement des flèches selon l'échelle active
-        windPoints.push({ index: localI, speed: Math.round(kmhToBeaufort(h.wind_speed_10m[origI])), dir: h.wind_direction_10m[origI] });
-      }
     });
 
-    if (typeof Chart === 'undefined') {
-      stateEl.textContent = 'Bibliothèque de graphiques indisponible.';
-      stateEl.classList.add('err');
-      return;
+    transitBody.innerHTML = '';
+    let allFailed = true;
+    merged.forEach(m => {
+      const tr = document.createElement('tr');
+      const label = combineLabels(m.labels);
+      if (m.error || !m.stop){
+        tr.innerHTML = `<td>${escapeHtml(label)}</td><td colspan="3" class="transit-error">Recherche impossible (${escapeHtml(m.error ? m.error.message : 'erreur inconnue')})</td>`;
+      } else {
+        allFailed = false;
+        const s = m.stop;
+        const badge = s.verified ? ' <span class="transit-verified" title="Résultat vérifié manuellement">✓ vérifié</span>' : '';
+        const geoUrl = stopLocationLink(s.stopLat, s.stopLon);
+        const nameHtml = geoUrl
+          ? `<a href="${geoUrl}" target="_blank" rel="noopener">${escapeHtml(s.name)}</a>`
+          : escapeHtml(s.name);
+        tr.innerHTML = `
+          <td>${escapeHtml(label)}</td>
+          <td>${nameHtml}${badge}</td>
+          <td>${escapeHtml(m.distanceTexts.join(' · '))}</td>
+          <td><a href="${s.url}" target="_blank" rel="noopener">${escapeHtml(s.linkLabel)}</a></td>`;
+      }
+      transitBody.appendChild(tr);
+    });
+
+    if (allFailed){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="4" class="transit-error">Les serveurs Overpass (OpenStreetMap) semblent inaccessibles depuis cette page pour le moment — réessayez dans quelques instants, ou ouvrez ce fichier directement dans votre navigateur si vous êtes dans un aperçu intégré.</td>`;
+      transitBody.appendChild(tr);
+    }
+  }
+
+  function showError(msg){
+    errorMsg.textContent = msg;
+    errorMsg.style.display = msg ? 'block' : 'none';
+  }
+
+  dropzone.addEventListener('click', (e) => {
+    if (e.target.closest('.file-chip')) return;
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+  ['dragenter','dragover'].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag'); });
+  });
+  ['dragleave','drop'].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag'); });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length) handleFiles(dt.files);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    tracks = []; hidden = {};
+    filesRow.innerHTML = '';
+    statsRow.innerHTML = ''; statsRow.style.display = 'none';
+    actionsRow.style.display = 'none';
+    mapCard.style.display = 'none';
+    weatherSection.style.display = 'none';
+    weatherGrid.innerHTML = '';
+    weatherChartInstances.forEach(c => { if (c) c.destroy(); });
+    weatherChartInstances[0] = weatherChartInstances[1] = null;
+    weatherSeriesCache[0] = weatherSeriesCache[1] = null;
+    transitSection.style.display = 'none';
+    transitBody.innerHTML = '';
+    if (leafletMap){ leafletMap.remove(); leafletMap = null; }
+    chartCard.style.display = 'none';
+    resetBtn.style.display = 'none';
+    showError('');
+    fileInput.value = '';
+  });
+
+  function handleFiles(fileList){
+    showError('');
+    const files = Array.from(fileList).filter(f => /\.gpx$/i.test(f.name));
+    if (!files.length){ showError('Merci de déposer des fichiers au format .gpx'); return; }
+
+    const remainingSlots = 2 - tracks.length;
+    if (remainingSlots <= 0){ showError('Deux traces sont déjà chargées. Cliquez sur ↺ pour recommencer.'); return; }
+
+    files.slice(0, remainingSlots).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try{
+          const track = parseGPX(e.target.result, file.name);
+          if (!track.xs.length || track.xs.length < 2){
+            showError(`"${file.name}" ne contient pas assez de points GPS.`);
+            return;
+          }
+          track.key = tracks.length === 0 ? 'a' : 'b';
+          tracks.push(track);
+          addFileChip(track);
+          showError('');
+          if (tracks.length >= 1) resetBtn.style.display = 'inline-block';
+          if (tracks.length === 2) render();
+        } catch(err){
+          showError(`Impossible de lire "${file.name}" : ${err.message}`);
+        }
+      };
+      reader.onerror = () => showError(`Erreur de lecture du fichier "${file.name}".`);
+      reader.readAsText(file);
+    });
+  }
+
+  function addFileChip(track){
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `<span class="dot" style="background:${COLORS[track.key].line}"></span><span>${escapeHtml(track.name)}</span>`;
+    filesRow.appendChild(chip);
+  }
+
+  function escapeHtml(s){
+    const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+  }
+
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dphi = toRad(lat2-lat1);
+    const dlambda = toRad(lon2-lon1);
+    const a = Math.sin(dphi/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dlambda/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  function parseGPX(text, filename){
+    const xml = new DOMParser().parseFromString(text, 'application/xml');
+    if (xml.querySelector('parsererror')) throw new Error('fichier XML invalide');
+    const trkpts = Array.from(xml.getElementsByTagName('trkpt'));
+    const source = trkpts.length ? trkpts : Array.from(xml.getElementsByTagName('rtept'));
+    if (!source.length) throw new Error('aucun point de trace trouvé');
+
+    let dist = 0;
+    const xs = [], ys = [], latlons = [];
+    let prevLat = null, prevLon = null;
+    let hasEle = false;
+
+    source.forEach((pt, i) => {
+      const lat = parseFloat(pt.getAttribute('lat'));
+      const lon = parseFloat(pt.getAttribute('lon'));
+      const eleEl = pt.getElementsByTagName('ele')[0];
+      const ele = eleEl ? parseFloat(eleEl.textContent) : null;
+      if (ele !== null && !Number.isNaN(ele)) hasEle = true;
+      if (i > 0 && prevLat !== null){
+        dist += haversine(prevLat, prevLon, lat, lon);
+      }
+      prevLat = lat; prevLon = lon;
+      xs.push(dist/1000);
+      ys.push(ele);
+      latlons.push([lat, lon]);
+    });
+
+    if (!hasEle) throw new Error("pas de données d'altitude dans ce fichier");
+
+    // forward/backward fill any missing elevation values
+    for (let i=0;i<ys.length;i++){
+      if (ys[i]===null || Number.isNaN(ys[i])){
+        let j=i-1; while(j>=0 && (ys[j]===null||Number.isNaN(ys[j]))) j--;
+        ys[i] = j>=0 ? ys[j] : null;
+      }
+    }
+    for (let i=ys.length-1;i>=0;i--){
+      if (ys[i]===null){
+        let j=i+1; while(j<ys.length && ys[j]===null) j++;
+        ys[i] = j<ys.length ? ys[j] : ys[i-1] || 0;
+      }
     }
 
-    locationSeries[idx] = { labels, temps, precs, windSeries, feelsSeries, humiditySeries, gustSeries, capeSeries, freezingSeries, aqiSeries, dividers, dayLabels, windPoints };
-    refreshCurrentView();
+    let dplus=0, dminus=0;
+    for (let i=1;i<ys.length;i++){
+      const diff = ys[i]-ys[i-1];
+      if (diff>0) dplus+=diff; else dminus+=-diff;
+    }
 
-  }catch(err){
-    locationSeries[idx] = null;
-    stateEl.textContent = 'Données indisponibles pour l’instant.';
-    stateEl.classList.add('err');
-    console.error(loc.name, err);
+    const displayName = filename.replace(/\.gpx$/i,'');
+    return {
+      name: displayName,
+      xs, ys, latlons,
+      rawText: text,
+      stats: {
+        dist: xs[xs.length-1],
+        dplus: Math.round(dplus),
+        dminus: Math.round(dminus),
+        net: Math.round(ys[ys.length-1]-ys[0]),
+        kmEffort: xs[xs.length-1] + dplus/100 + dminus/300,
+        eleMax: Math.max(...ys),
+        eleMin: Math.min(...ys)
+      }
+    };
   }
-}
 
-// On construit d'abord toutes les cartes (toujours visibles),
-// puis on charge les données/graphes indépendamment pour chacune.
-currentLocations.forEach((loc, idx) => buildCardShell(loc, idx));
-LOCATIONS.forEach((loc, idx) => loadLocation(idx));
-setupScaleToggle();
-setupViewToggle();
-setupMetricToggle();
-setupDayNav();
-setupCitySelectButtons();
-setupGeolocationButton();
-window.addEventListener('beforeunload', saveSessionState);
+  function interp(grid, xs, ys){
+    const out = []; let j=0; const n=xs.length;
+    for (const g of grid){
+      if (g > xs[n-1]+1e-9){ out.push(null); continue; }
+      while (j<n-2 && xs[j+1]<g) j++;
+      const x0=xs[j], x1=xs[j+1], y0=ys[j], y1=ys[j+1];
+      const val = x1===x0 ? y0 : y0 + (g-x0)/(x1-x0)*(y1-y0);
+      out.push(val);
+    }
+    return out;
+  }
 
-// --- PWA : enregistrement du service worker + bouton d'installation personnalisé ---
-if('serviceWorker' in navigator){
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch((e) => console.error('SW indisponible', e));
-  });
-}
+  function render(){
+    // Stat cards
+    statsRow.innerHTML = '';
+    statsRow.style.display = 'flex';
+    tracks.forEach(t => {
+      const card = document.createElement('div');
+      card.className = 'stat-card ' + t.key;
+      card.dataset.key = t.key;
+      const actionLabel = isAndroid ? 'Ouvrir dans OsmAnd' : 'Voir sur OpenStreetMap';
+      card.innerHTML = `
+        <div class="name"><span class="sw" style="background:${COLORS[t.key].line}"></span>${escapeHtml(t.name)}</div>
+        <div class="stat-grid">
+          <div>Distance<strong>${t.stats.dist.toFixed(2)} km</strong></div>
+          <div>Dénivelé net<strong>${t.stats.net>=0?'+':''}${t.stats.net} m</strong></div>
+          <div>D+ (positif)<strong>${t.stats.dplus} m</strong></div>
+          <div>D− (négatif)<strong>−${t.stats.dminus} m</strong></div>
+          <div style="grid-column: 1 / -1; margin-top:2px; padding-top:8px; border-top:1px solid var(--paper-deep);">Km-effort<strong>${t.stats.kmEffort.toFixed(2)} km-effort</strong></div>
+        </div>`;
+      card.addEventListener('click', () => {
+        hidden[t.key] = !hidden[t.key];
+        card.classList.toggle('hidden-trace', !!hidden[t.key]);
+        drawChart();
+      });
+      statsRow.appendChild(card);
+    });
 
-let deferredInstallPrompt = null;
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  deferredInstallPrompt = event;
-  const group = document.getElementById('install-group');
-  if(group) group.style.display = 'flex';
-});
+    // Single button to push both tracks to OpenStreetMap (embedded map) or OsmAnd
+    actionsRow.style.display = 'flex';
+    if (isAndroid){
+      pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-6-3V4l6 3m0 13l6-3m-6 3V7m6 10l6 3V6l-6-3m0 14V4m0 0L9 7"/></svg> Ouvrir les 2 traces dans OsmAnd`;
+      actionsNote.textContent = "Télécharge un fichier GPX combiné (les 2 traces) — votre appareil proposera de l'ouvrir avec OsmAnd si l'app est installée.";
+    } else {
+      pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="2.5"/><path d="M12 21c-4-4.5-7-8.2-7-11.5A7 7 0 0119 9.5C19 12.8 16 16.5 12 21z"/></svg> Afficher les 2 traces sur la carte`;
+      actionsNote.textContent = "";
+    }
+    pushBtn.onclick = pushBothTracks;
 
-const installBtn = document.getElementById('install-app');
-if(installBtn){
-  installBtn.addEventListener('click', async () => {
-    if(!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
-    document.getElementById('install-group').style.display = 'none';
-  });
-}
+    chartCard.style.display = 'block';
+    footnote.textContent = `Distance calculée par cumul des segments GPS (formule de haversine) sur ${tracks.map(t=>t.name).join(' et ')}. Cliquez sur une carte pour isoler un tracé.`;
+    drawChart();
+    loadWeatherForFirstTrack(tracks[0]);
+    loadTransitOptions(tracks);
+  }
 
-window.addEventListener('appinstalled', () => {
-  const group = document.getElementById('install-group');
-  if(group) group.style.display = 'none';
-});
+  let mergedGrid = null, mergedA = null, mergedB = null;
+
+  function buildMerged(){
+    const maxd = Math.max(...tracks.map(t => t.stats.dist));
+    const N = 400;
+    const grid = Array.from({length:N}, (_,i) => maxd*i/(N-1));
+    mergedGrid = grid;
+    mergedA = tracks[0] ? interp(grid, tracks[0].xs, tracks[0].ys) : null;
+    mergedB = tracks[1] ? interp(grid, tracks[1].xs, tracks[1].ys) : null;
+  }
+
+  function drawChart(){
+    if (!mergedGrid) buildMerged();
+    const W = 900, H = 380;
+    const padL = 54, padR = 20, padT = 16, padB = 40;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+
+    const allVals = [];
+    if (!hidden.a) mergedA.forEach(v => { if (v!==null) allVals.push(v); });
+    if (!hidden.b) mergedB && mergedB.forEach(v => { if (v!==null) allVals.push(v); });
+    if (!allVals.length){ chartSvg.innerHTML = ''; return; }
+
+    const yMin = Math.min(...allVals) - 30;
+    const yMax = Math.max(...allVals) + 30;
+    const xMax = mergedGrid[mergedGrid.length-1];
+
+    const xScale = x => padL + (x/xMax)*plotW;
+    const yScale = y => padT + plotH - ((y-yMin)/(yMax-yMin))*plotH;
+
+    let svg = '';
+
+    // grid lines (horizontal, 5 divisions)
+    const yTicks = 5;
+    for (let i=0;i<=yTicks;i++){
+      const val = yMin + (yMax-yMin)*i/yTicks;
+      const y = yScale(val);
+      svg += `<line class="grid-line" x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}"/>`;
+      svg += `<text class="axis-label" x="${padL-10}" y="${y+4}" text-anchor="end">${Math.round(val)}</text>`;
+    }
+    // x ticks
+    const xTicks = 6;
+    for (let i=0;i<=xTicks;i++){
+      const val = xMax*i/xTicks;
+      const x = xScale(val);
+      svg += `<text class="axis-label" x="${x}" y="${H-padB+18}" text-anchor="middle">${val.toFixed(1)}</text>`;
+    }
+    svg += `<text class="axis-label" x="${W-padR}" y="${H-4}" text-anchor="end" style="opacity:0.7">km</text>`;
+
+    function areaFor(vals){
+      let segs = []; let seg=[];
+      vals.forEach((v,i) => { if(v===null){ if(seg.length) segs.push(seg); seg=[]; return;} seg.push([mergedGrid[i],v]); });
+      if (seg.length) segs.push(seg);
+      return segs.map(s => {
+        const top = s.map((p,i)=>`${i===0?'M':'L'}${xScale(p[0]).toFixed(1)},${yScale(p[1]).toFixed(1)}`).join(' ');
+        const base = yScale(yMin);
+        const last = s[s.length-1], first = s[0];
+        return `${top} L${xScale(last[0]).toFixed(1)},${base} L${xScale(first[0]).toFixed(1)},${base} Z`;
+      });
+    }
+
+    // Colours each small stretch of the line by its local slope (rise/run),
+    // using the same blue→green→gray→yellow→red scale as the map.
+    function slopeLineSegments(vals){
+      let out = '';
+      for (let i=1;i<vals.length;i++){
+        const v0 = vals[i-1], v1 = vals[i];
+        if (v0===null || v1===null) continue;
+        const distM = (mergedGrid[i]-mergedGrid[i-1]) * 1000;
+        if (distM <= 0) continue;
+        const slopePct = ((v1-v0)/distM) * 100;
+        const x0 = xScale(mergedGrid[i-1]), x1 = xScale(mergedGrid[i]);
+        const y0 = yScale(v0), y1 = yScale(v1);
+        out += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${slopeColor(slopePct)}" stroke-width="2.6" stroke-linecap="round"/>`;
+      }
+      return out;
+    }
+
+    if (!hidden.b && mergedB){
+      areaFor(mergedB).forEach(d => svg += `<path d="${d}" fill="${COLORS.b.fill}" stroke="none"/>`);
+      svg += slopeLineSegments(mergedB);
+    }
+    if (!hidden.a){
+      areaFor(mergedA).forEach(d => svg += `<path d="${d}" fill="${COLORS.a.fill}" stroke="none"/>`);
+      svg += slopeLineSegments(mergedA);
+    }
+
+    // interaction overlay
+    svg += `<rect id="hoverRect" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="transparent"/>`;
+    svg += `<line id="crosshair" x1="0" y1="${padT}" x2="0" y2="${padT+plotH}" stroke="#2b2620" stroke-width="1" stroke-dasharray="3,3" opacity="0"/>`;
+
+    chartSvg.innerHTML = svg;
+    chartSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+    const hoverRect = document.getElementById('hoverRect');
+    const crosshair = document.getElementById('crosshair');
+
+    hoverRect.addEventListener('mousemove', (e) => {
+      const rect = chartSvg.getBoundingClientRect();
+      const scaleX = W / rect.width;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const relX = (mx - padL) / plotW;
+      const idx = Math.round(relX * (mergedGrid.length-1));
+      if (idx < 0 || idx >= mergedGrid.length) return;
+      const d = mergedGrid[idx];
+      const vA = mergedA ? mergedA[idx] : null;
+      const vB = mergedB ? mergedB[idx] : null;
+      crosshair.setAttribute('x1', xScale(d)); crosshair.setAttribute('x2', xScale(d));
+      crosshair.setAttribute('opacity', '1');
+
+      let html = `<div class="dist">${d.toFixed(2)} km</div>`;
+      if (!hidden.a && vA!==null) html += `<div class="row"><span><span class="sw" style="background:${COLORS.a.line}"></span>${escapeHtml(tracks[0].name)}</span><strong>${Math.round(vA)} m</strong></div>`;
+      if (!hidden.b && tracks[1] && vB!==null) html += `<div class="row"><span><span class="sw" style="background:${COLORS.b.line}"></span>${escapeHtml(tracks[1].name)}</span><strong>${Math.round(vB)} m</strong></div>`;
+      tooltip.innerHTML = html;
+      tooltip.style.opacity = '1';
+
+      const wrapRect = chartCard.getBoundingClientRect();
+      let tx = e.clientX - wrapRect.left + 14;
+      let ty = e.clientY - wrapRect.top - 10;
+      if (tx + 160 > wrapRect.width) tx = e.clientX - wrapRect.left - 170;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = ty + 'px';
+    });
+    hoverRect.addEventListener('mouseleave', () => {
+      tooltip.style.opacity = '0';
+      crosshair.setAttribute('opacity','0');
+    });
+  }
+
+  window.addEventListener('resize', () => { if (tracks.length===2) drawChart(); });
+})();
 </script>
-
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.error('Échec d\'enregistrement du service worker', err));
+  });
+}
+</script>
 </body>
 </html>

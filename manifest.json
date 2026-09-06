@@ -1,0 +1,19 @@
+{
+  "name": "Comparateur de traces GPX",
+  "short_name": "GPX Compare",
+  "description": "Compare le profil altimétrique, la carte, la météo et les transports en commun pour deux traces GPX.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "id": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f1ecdd",
+  "theme_color": "#2b2620",
+  "lang": "fr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
